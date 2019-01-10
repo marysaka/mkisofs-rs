@@ -5,3 +5,4 @@ authors = ["Thog <me@thog.eu>"]
 edition = "2018"
 
 [dependencies]
+byteorder = "1"
