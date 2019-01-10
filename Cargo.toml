@@ -1,0 +1,7 @@
+[package]
+name = "mkbootableiso"
+version = "0.1.0"
+authors = ["Thog <me@thog.eu>"]
+edition = "2018"
+
+[dependencies]
