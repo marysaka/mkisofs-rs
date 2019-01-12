@@ -7,6 +7,7 @@ use chrono::prelude::*;
 use std;
 use std::env;
 use std::fs;
+use std::io;
 use std::io::prelude::*;
 use std::io::SeekFrom;
 use std::fs::File;
@@ -19,7 +20,8 @@ struct FileEntry
 {
     pub path: PathBuf,
     pub size: usize,
-    pub lba: u32
+    pub lba: u32,
+    pub aligned_size: usize
 }
 
 #[derive(Debug, Clone)]
@@ -48,13 +50,12 @@ fn main() {
     }
 }
 
-pub fn align(size: usize, padding: usize) -> usize {
-    ((size as usize) + padding) & !padding
+pub fn align_up(value: i32, padding: i32) -> i32 {
+    (value + (padding - 1)) & -padding
 }
 
 fn construct_directory(path : PathBuf, current_lba : &mut u32) -> std::io::Result<DirectoryEntry>
 {
-    let mut lba = current_lba;
     let dir_path = path.clone();
     let mut dir_childs : Vec<DirectoryEntry> = Vec::new();
     let mut files_childs : Vec<FileEntry> = Vec::new();
@@ -63,14 +64,29 @@ fn construct_directory(path : PathBuf, current_lba : &mut u32) -> std::io::Resul
         let entry : DirEntry = entry_res?;
         let entry_meta : Metadata = entry.metadata()?;
         if entry_meta.is_dir() {
-            dir_childs.push(construct_directory(entry.path(), lba)?);
+            dir_childs.push(construct_directory(entry.path(), current_lba)?);
         } else if entry_meta.is_file() {
             // TODO: lba
-            files_childs.push(FileEntry { path: entry.path(), size: entry_meta.len() as usize, lba: 0})
+            files_childs.push(FileEntry { path: entry.path(), size: entry_meta.len() as usize, lba: 0, aligned_size: align_up(entry_meta.len() as i32, 0x800) as usize})
         }
     }
-    *lba += 1;
-    Ok(DirectoryEntry {path: dir_path, dir_childs, files_childs, lba: *lba})
+    *current_lba += 1;
+    Ok(DirectoryEntry {path: dir_path, dir_childs, files_childs, lba: *current_lba})
+}
+
+fn reserve_file_space(directory_entry : &mut DirectoryEntry, current_lba : &mut u32)
+{
+    for child_directory in &mut directory_entry.dir_childs
+    {
+        reserve_file_space(child_directory, current_lba);
+    }
+
+    for child_file in &mut directory_entry.files_childs
+    {
+        let lba_count = (child_file.size + 0x800) / 0x800;
+        child_file.lba = *current_lba;
+        *current_lba += lba_count as u32;
+    }
 }
 
 #[derive(Debug)]
@@ -147,6 +163,35 @@ impl FileEntry
 
         Ok(())
     }
+
+    fn write_content<T>(&mut self, output_writter: &mut T) -> std::io::Result<()> where T: Write + Seek
+    {
+        let old_pos = output_writter.seek(SeekFrom::Current(0))?;
+
+        // Seek to the correct LBA
+        output_writter.seek(SeekFrom::Start((self.lba * 0x800) as u64))?;
+
+        // TODO support other content provider
+        let mut file = File::open(&self.path)?;
+
+        io::copy(&mut file, output_writter)?;
+
+        let current_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
+        let expected_aligned_pos = ((current_pos as i64) & -0x800) as usize;
+
+        let diff_size = current_pos - expected_aligned_pos;
+
+        if diff_size != 0
+        {
+            let mut padding : Vec<u8> = Vec::new();
+            padding.resize(0x800 - diff_size, 0u8);
+            output_writter.write(&padding)?;
+        }
+
+        output_writter.seek(SeekFrom::Start(old_pos))?;
+
+        Ok(())
+    }
 }
 
 impl DirectoryEntry
@@ -220,7 +265,6 @@ impl DirectoryEntry
 
     fn write_extent<T>(&mut self, output_writter: &mut T, parent_option : Option<&DirectoryEntry>) -> std::io::Result<()> where T: Write + Seek
     {
-        println!("{:?}", self);
         let old_pos = output_writter.seek(SeekFrom::Current(0))?;
 
         // Seek to the correct LBA
@@ -240,10 +284,8 @@ impl DirectoryEntry
 
         parent.write_as_parent(output_writter)?;
 
-        // TODO: every files
         for child_file in &mut self.files_childs
         {
-            println!("{:?}", child_file);
             child_file.write_entry(output_writter)?;
         }
 
@@ -272,6 +314,20 @@ impl DirectoryEntry
         // Restore old position
         output_writter.seek(SeekFrom::Start(old_pos))?;
 
+        Ok(())
+    }
+
+    fn write_files<T>(&mut self, output_writter: &mut T) -> std::io::Result<()> where T: Write + Seek
+    {
+        for child_directory in &mut self.dir_childs
+        {
+            child_directory.write_files(output_writter)?;
+        }
+
+        for child_file in &mut self.files_childs
+        {
+            child_file.write_content(output_writter)?;
+        }
         Ok(())
     }
 
@@ -432,10 +488,15 @@ fn create_grub_iso(output_path : String, input_directory : String) -> std::io::R
 
     // First we have the System Area, that is unused
     let buffer : [u8; 0x8000] = [0; 0x8000];
+
+    // TODO: Path Table
     let mut current_lba : u32 = 0x10 + 2 + 2 + (volume_descriptor_list.len() as u32);
 
-    let mut tree = construct_directory(PathBuf::from(input_directory), &mut current_lba).unwrap();
-    //println!("{:?}", tree);
+    let mut tree = construct_directory(PathBuf::from(input_directory), &mut current_lba)?;
+
+    current_lba += 1;
+
+    reserve_file_space(&mut tree, &mut current_lba);
 
     out_file.write_all(&buffer)?;
     for mut volume in volume_descriptor_list
@@ -446,6 +507,7 @@ fn create_grub_iso(output_path : String, input_directory : String) -> std::io::R
     // TODO: Path table LE/BE
 
     tree.write_extent(&mut out_file, None)?;
+    tree.write_files(&mut out_file)?;
     // TODO write files
 
     Ok(())
