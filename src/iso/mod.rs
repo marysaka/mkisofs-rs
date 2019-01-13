@@ -3,6 +3,7 @@ mod utils;
 mod directory_entry;
 mod file_entry;
 mod volume_descriptor;
+pub mod option;
 
 use byteorder::{BigEndian, LittleEndian};
 
@@ -59,10 +60,10 @@ fn generate_volume_descriptors() -> Vec<VolumeDescriptor> {
     res
 }
 
-pub fn create_iso(output_path: String, input_directory: String) -> std::io::Result<()> {
+pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
     let volume_descriptor_list = generate_volume_descriptors();
 
-    let mut out_file = File::create(output_path)?;
+    let mut out_file = File::create(&opt.output)?;
 
     // First we have the System Area, that is unused
     let buffer: [u8; utils::LOGIC_SIZE * 0x10] = [0; utils::LOGIC_SIZE * 0x10];
@@ -74,13 +75,12 @@ pub fn create_iso(output_path: String, input_directory: String) -> std::io::Resu
     // Reserve 4 LBA for path tables (add some spacing after table)
     current_lba += 4;
 
-    let mut tree = DirectoryEntry::new(PathBuf::from(input_directory))?;
+    let mut tree = DirectoryEntry::new(PathBuf::from(&opt.input_directory))?;
     let mut path_table_index = 0;
 
     assign_directory_identifiers(&mut tree, &mut path_table_index, current_lba - 1);
     tree.parent_index = 1;
     tree.lba = current_lba;
-    tree.print();
 
     current_lba += path_table_index;
     current_lba += 1;
