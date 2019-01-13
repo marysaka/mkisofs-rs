@@ -47,7 +47,7 @@ impl VolumeDescriptor {
         size_in_lb: u32,
     ) -> std::io::Result<()>
     where
-        T: Write,
+        T: Write + Seek,
     {
         self.write_volume_header(output_writter)?;
 

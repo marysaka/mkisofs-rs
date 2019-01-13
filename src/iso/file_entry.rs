@@ -22,8 +22,21 @@ pub struct FileEntry {
 impl FileEntry {
     pub fn write_entry<T>(&self, output_writter: &mut T) -> std::io::Result<()>
     where
-        T: Write,
+        T: Write + Seek,
     {
+        let current_pos = output_writter.seek(SeekFrom::Current(0))? as i32;
+        let expected_aligned_pos = utils::align_up(current_pos, LOGIC_SIZE_U32 as i32);
+
+        let diff_size = expected_aligned_pos - current_pos;
+        let file_entry_size = self.get_entry_size() as i32;
+
+        if file_entry_size > diff_size && diff_size != 0
+        {
+            let mut padding: Vec<u8> = Vec::new();
+            padding.resize(diff_size as usize, 0u8);
+            output_writter.write_all(&padding)?;
+        }
+
         let file_name = self
             .path
             .file_name()
@@ -82,6 +95,17 @@ impl FileEntry {
         }
 
         Ok(())
+    }
+
+    pub fn get_entry_size(&self) -> u32 {
+        let file_name = self
+            .path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        utils::get_entry_size(0x21, file_name, 0, 1)
     }
 
     pub fn write_content<T>(&mut self, output_writter: &mut T) -> std::io::Result<()>
