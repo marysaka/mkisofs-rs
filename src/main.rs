@@ -1,18 +1,18 @@
 extern crate byteorder;
 extern crate chrono;
 
-use byteorder::{LittleEndian, BigEndian, ByteOrder, WriteBytesExt};
+use byteorder::{BigEndian, ByteOrder, LittleEndian, WriteBytesExt};
 use chrono::prelude::*;
 
 use std;
 use std::env;
 use std::fs;
+use std::fs::DirEntry;
+use std::fs::File;
+use std::fs::Metadata;
 use std::io;
 use std::io::prelude::*;
 use std::io::SeekFrom;
-use std::fs::File;
-use std::fs::DirEntry;
-use std::fs::Metadata;
 use std::path::PathBuf;
 
 const LOGIC_SIZE: usize = 0x800;
@@ -20,41 +20,37 @@ const LOGIC_SIZE_I64: i64 = 0x800;
 const LOGIC_SIZE_U32: u32 = 0x800;
 const LOGIC_SIZE_U16: u16 = 0x800;
 
-
 #[derive(Debug, Clone)]
-struct FileEntry
-{
+struct FileEntry {
     pub path: PathBuf,
     pub size: usize,
     pub lba: u32,
-    pub aligned_size: usize
+    pub aligned_size: usize,
 }
 
 #[derive(Debug, Clone)]
-struct DirectoryEntry
-{
-    pub path_table_index : u32,
-    pub parent_index : u32,
+struct DirectoryEntry {
+    pub path_table_index: u32,
+    pub parent_index: u32,
     pub path: PathBuf,
-    pub dir_childs : Vec<DirectoryEntry>,
-    pub files_childs : Vec<FileEntry>,
-    pub lba : u32
+    pub dir_childs: Vec<DirectoryEntry>,
+    pub files_childs: Vec<FileEntry>,
+    pub lba: u32,
 }
 
 fn main() {
     let mut args = env::args();
     let executable_path = args.next().unwrap();
 
-    match args.len()
-    {
+    match args.len() {
         2 => {
             let output_path = args.next().unwrap();
             let input_directory = args.next().unwrap();
             println!("Output file {}", output_path);
             println!("Input directory {}", input_directory);
             create_grub_iso(output_path, input_directory).unwrap();
-        },
-        _ => println!("Usage: {} out.iso input_directory", executable_path)
+        }
+        _ => println!("Usage: {} out.iso input_directory", executable_path),
     }
 }
 
@@ -62,79 +58,78 @@ pub fn align_up(value: i32, padding: i32) -> i32 {
     (value + (padding - 1)) & -padding
 }
 
-fn construct_directory(path : PathBuf) -> std::io::Result<DirectoryEntry>
-{
+fn construct_directory(path: PathBuf) -> std::io::Result<DirectoryEntry> {
     let dir_path = path.clone();
-    let mut dir_childs : Vec<DirectoryEntry> = Vec::new();
-    let mut files_childs : Vec<FileEntry> = Vec::new();
+    let mut dir_childs: Vec<DirectoryEntry> = Vec::new();
+    let mut files_childs: Vec<FileEntry> = Vec::new();
 
-    let mut ordered_dir: Vec<DirEntry> = fs::read_dir(path)?
-                                              .map(|r| r.unwrap())
-                                              .collect();
+    let mut ordered_dir: Vec<DirEntry> = fs::read_dir(path)?.map(|r| r.unwrap()).collect();
     ordered_dir.sort_by_key(|dir| dir.path());
 
     for entry in ordered_dir {
-        let entry_meta : Metadata = entry.metadata()?;
+        let entry_meta: Metadata = entry.metadata()?;
         if entry_meta.is_dir() {
             dir_childs.push(construct_directory(entry.path())?);
         } else if entry_meta.is_file() {
-            files_childs.push(FileEntry { path: entry.path(), size: entry_meta.len() as usize, lba: 0, aligned_size: align_up(entry_meta.len() as i32, LOGIC_SIZE_U32 as i32) as usize})
+            files_childs.push(FileEntry {
+                path: entry.path(),
+                size: entry_meta.len() as usize,
+                lba: 0,
+                aligned_size: align_up(entry_meta.len() as i32, LOGIC_SIZE_U32 as i32) as usize,
+            })
         }
     }
-    Ok(DirectoryEntry {path_table_index: 0, parent_index: 0, path: dir_path, dir_childs, files_childs, lba: 0})
+    Ok(DirectoryEntry {
+        path_table_index: 0,
+        parent_index: 0,
+        path: dir_path,
+        dir_childs,
+        files_childs,
+        lba: 0,
+    })
 }
 
-fn assign_directory_identifiers(tree: &mut DirectoryEntry, last_index: &mut u32, current_lba: u32)
-{
-    if *last_index == 0
-    {
+fn assign_directory_identifiers(tree: &mut DirectoryEntry, last_index: &mut u32, current_lba: u32) {
+    if *last_index == 0 {
         tree.parent_index = *last_index;
         tree.path_table_index = *last_index + 1;
 
         *last_index = tree.path_table_index;
-    }
-    else
-    {
+    } else {
         tree.lba = current_lba + tree.path_table_index;
     }
 
-    for entry in &mut tree.dir_childs
-    {
+    for entry in &mut tree.dir_childs {
         entry.parent_index = tree.path_table_index;
         entry.path_table_index = *last_index + 1;
 
         *last_index = entry.path_table_index;
     }
 
-    for entry in &mut tree.dir_childs
-    {
+    for entry in &mut tree.dir_childs {
         assign_directory_identifiers(entry, last_index, current_lba);
     }
 }
 
-fn reserve_file_space(directory_entry : &mut DirectoryEntry, current_lba : &mut u32)
-{
-    for child_directory in &mut directory_entry.dir_childs
-    {
+fn reserve_file_space(directory_entry: &mut DirectoryEntry, current_lba: &mut u32) {
+    for child_directory in &mut directory_entry.dir_childs {
         reserve_file_space(child_directory, current_lba);
     }
 
-    for child_file in &mut directory_entry.files_childs
-    {
+    for child_file in &mut directory_entry.files_childs {
         let lba_count = ((child_file.size as u32) + LOGIC_SIZE_U32) / LOGIC_SIZE_U32;
         child_file.lba = *current_lba;
-        *current_lba += lba_count ;
+        *current_lba += lba_count;
     }
 }
 
 #[derive(Debug)]
-enum VolumeDescriptor
-{
+enum VolumeDescriptor {
     Boot,
     Primary,
     Supplementary,
     Volume,
-    End
+    End,
 }
 
 macro_rules! write_bothendian {
@@ -144,25 +139,29 @@ macro_rules! write_bothendian {
     }
 }
 
-impl FileEntry
-{
-    fn write_entry<T>(&self, output_writter: &mut T) -> std::io::Result<()> where T: Write
+impl FileEntry {
+    fn write_entry<T>(&self, output_writter: &mut T) -> std::io::Result<()>
+    where
+        T: Write,
     {
         // TODO: CONVERT IT TO VALID DATA
-        let file_name = self.path.file_name().unwrap().to_str().unwrap().to_uppercase();
+        let file_name = self
+            .path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_uppercase();
         let file_identifier = file_name.as_bytes();
         let file_identifier_len = file_identifier.len() + 2;
 
-        let file_identifier_padding = match (file_identifier_len % 2) == 0 {
-            true => 1,
-            false => 0
-        };
+        let file_identifier_padding = if (file_identifier_len % 2) == 0 { 1 } else { 0 };
 
-        let entry_size : u8 = 0x21u8 + (file_identifier_len as u8) + file_identifier_padding;
+        let entry_size: u8 = 0x21u8 + (file_identifier_len as u8) + file_identifier_padding;
 
         output_writter.write_u8(entry_size)?;
 
-        // Extended Attribute Record length. 
+        // Extended Attribute Record length.
         // TODO Rock Ridge
         output_writter.write_u8(0u8)?;
 
@@ -207,12 +206,14 @@ impl FileEntry
         Ok(())
     }
 
-    fn write_content<T>(&mut self, output_writter: &mut T) -> std::io::Result<()> where T: Write + Seek
+    fn write_content<T>(&mut self, output_writter: &mut T) -> std::io::Result<()>
+    where
+        T: Write + Seek,
     {
         let old_pos = output_writter.seek(SeekFrom::Current(0))?;
 
         // Seek to the correct LBA
-        output_writter.seek(SeekFrom::Start((self.lba * LOGIC_SIZE_U32) as u64))?;
+        output_writter.seek(SeekFrom::Start(u64::from(self.lba * LOGIC_SIZE_U32)))?;
 
         // TODO support other content provider
         let mut file = File::open(&self.path)?;
@@ -224,11 +225,10 @@ impl FileEntry
 
         let diff_size = current_pos - expected_aligned_pos;
 
-        if diff_size != 0
-        {
-            let mut padding : Vec<u8> = Vec::new();
+        if diff_size != 0 {
+            let mut padding: Vec<u8> = Vec::new();
             padding.resize(LOGIC_SIZE - diff_size, 0u8);
-            output_writter.write(&padding)?;
+            output_writter.write_all(&padding)?;
         }
 
         output_writter.seek(SeekFrom::Start(old_pos))?;
@@ -237,11 +237,22 @@ impl FileEntry
     }
 }
 
-impl DirectoryEntry
-{
-    fn write_entry<T>(directory_entry : &DirectoryEntry, output_writter: &mut T, directory_type : u32) -> std::io::Result<()> where T: Write
+impl DirectoryEntry {
+    fn write_entry<T>(
+        directory_entry: &DirectoryEntry,
+        output_writter: &mut T,
+        directory_type: u32,
+    ) -> std::io::Result<()>
+    where
+        T: Write,
     {
-        let file_name = directory_entry.path.file_name().unwrap().to_str().unwrap().to_uppercase();
+        let file_name = directory_entry
+            .path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_uppercase();
 
         let file_identifier = match directory_type {
             1 => &[0u8],
@@ -253,16 +264,11 @@ impl DirectoryEntry
         };
 
         let file_identifier_len = file_identifier.len();
-        let file_identifier_padding = match (file_identifier_len % 2) == 0 {
-            true => 1,
-            false => 0
-        };
+        let file_identifier_padding = if (file_identifier_len % 2) == 0 { 1 } else { 0 };
 
-        let entry_size : u8 = match directory_type {
-            0 => {
-                0x21u8 + (file_identifier_len as u8) + file_identifier_padding
-            },
-            _ => 0x22u8
+        let entry_size: u8 = match directory_type {
+            0 => 0x21u8 + (file_identifier_len as u8) + file_identifier_padding,
+            _ => 0x22u8,
         };
 
         output_writter.write_u8(entry_size)?;
@@ -311,11 +317,16 @@ impl DirectoryEntry
         Ok(())
     }
 
-    fn get_path_table_size(&self) -> u32
-    {
+    fn get_path_table_size(&self) -> u32 {
         let mut res = 0x8u32;
 
-        let file_name = self.path.file_name().unwrap().to_str().unwrap().to_uppercase();
+        let file_name = self
+            .path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_uppercase();
         let file_identifier = match self.path_table_index {
             1 => &[0u8],
             _ => {
@@ -330,17 +341,28 @@ impl DirectoryEntry
 
         res += file_identifier_len as u32;
 
-        for entry in &self.dir_childs
-        {
+        for entry in &self.dir_childs {
             res += entry.get_path_table_size();
         }
 
         res
     }
 
-    fn write_path_table_entry<T, Order: ByteOrder>(directory_entry : &DirectoryEntry, output_writter: &mut T, directory_type : u32) -> std::io::Result<()> where T: Write
+    fn write_path_table_entry<T, Order: ByteOrder>(
+        directory_entry: &DirectoryEntry,
+        output_writter: &mut T,
+        directory_type: u32,
+    ) -> std::io::Result<()>
+    where
+        T: Write,
     {
-        let file_name = directory_entry.path.file_name().unwrap().to_str().unwrap().to_uppercase();
+        let file_name = directory_entry
+            .path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_uppercase();
 
         let file_identifier = match directory_type {
             1 => &[0u8],
@@ -366,30 +388,38 @@ impl DirectoryEntry
         Ok(())
     }
 
-    fn write_path_table_childs<T, Order: ByteOrder>(&mut self, output_writter: &mut T) -> std::io::Result<()> where T: Write
+    fn write_path_table_childs<T, Order: ByteOrder>(
+        &mut self,
+        output_writter: &mut T,
+    ) -> std::io::Result<()>
+    where
+        T: Write,
     {
-        for entry in &mut self.dir_childs
-        {
+        for entry in &mut self.dir_childs {
             DirectoryEntry::write_path_table_entry::<T, Order>(entry, output_writter, 0)?;
         }
 
-        for entry in &mut self.dir_childs
-        {
+        for entry in &mut self.dir_childs {
             entry.write_path_table_childs::<T, Order>(output_writter)?;
         }
 
         Ok(())
     }
 
-    fn write_path_table<T, Order: ByteOrder>(&mut self, output_writter: &mut T, path_table_pos: u32) -> std::io::Result<()> where T: Write + Seek
+    fn write_path_table<T, Order: ByteOrder>(
+        &mut self,
+        output_writter: &mut T,
+        path_table_pos: u32,
+    ) -> std::io::Result<()>
+    where
+        T: Write + Seek,
     {
         let old_pos = output_writter.seek(SeekFrom::Current(0))?;
 
         // Seek to the correct LBA
-        output_writter.seek(SeekFrom::Start((path_table_pos * LOGIC_SIZE_U32) as u64))?;
+        output_writter.seek(SeekFrom::Start(u64::from(path_table_pos * LOGIC_SIZE_U32)))?;
 
         let old_pos_current_context = output_writter.seek(SeekFrom::Current(0))?;
-
 
         // Write root
         DirectoryEntry::write_path_table_entry::<T, Order>(self, output_writter, 1)?;
@@ -405,11 +435,10 @@ impl DirectoryEntry
         let written_size = current_pos - (old_pos_current_context as usize);
         assert!(written_size == (self.get_path_table_size() as usize));
 
-        if diff_size != 0
-        {
-            let mut padding : Vec<u8> = Vec::new();
+        if diff_size != 0 {
+            let mut padding: Vec<u8> = Vec::new();
             padding.resize(LOGIC_SIZE - diff_size, 0u8);
-            output_writter.write(&padding)?;
+            output_writter.write_all(&padding)?;
         }
 
         // Restore old position
@@ -418,23 +447,35 @@ impl DirectoryEntry
         Ok(())
     }
 
-    fn write_extent<T>(&mut self, output_writter: &mut T, parent_option : Option<&DirectoryEntry>) -> std::io::Result<()> where T: Write + Seek
+    fn write_extent<T>(
+        &mut self,
+        output_writter: &mut T,
+        parent_option: Option<&DirectoryEntry>,
+    ) -> std::io::Result<()>
+    where
+        T: Write + Seek,
     {
         let old_pos = output_writter.seek(SeekFrom::Current(0))?;
 
         // Seek to the correct LBA
-        output_writter.seek(SeekFrom::Start((self.lba * LOGIC_SIZE_U32) as u64))?;
+        output_writter.seek(SeekFrom::Start(u64::from(self.lba * LOGIC_SIZE_U32)))?;
 
         self.write_as_current(output_writter)?;
 
         let mut empty_parent_path = PathBuf::new();
-        empty_parent_path.set_file_name("dummy"); 
-        let empty_parent = DirectoryEntry {path_table_index: 0, parent_index: 0, path: empty_parent_path, dir_childs: Vec::new(), files_childs: Vec::new(), lba: self.lba};
+        empty_parent_path.set_file_name("dummy");
+        let empty_parent = DirectoryEntry {
+            path_table_index: 0,
+            parent_index: 0,
+            path: empty_parent_path,
+            dir_childs: Vec::new(),
+            files_childs: Vec::new(),
+            lba: self.lba,
+        };
 
-        let parent = match parent_option
-        {
+        let parent = match parent_option {
             Some(res) => res,
-            None => &empty_parent
+            None => &empty_parent,
         };
 
         parent.write_as_parent(output_writter)?;
@@ -442,14 +483,12 @@ impl DirectoryEntry
         // FIXME: dirty
         let self_clone = self.clone();
 
-        for child_directory in &mut self.dir_childs
-        {
+        for child_directory in &mut self.dir_childs {
             child_directory.write_one(output_writter)?;
             child_directory.write_extent(output_writter, Some(&self_clone))?;
         }
 
-        for child_file in &mut self.files_childs
-        {
+        for child_file in &mut self.files_childs {
             child_file.write_entry(output_writter)?;
         }
 
@@ -459,11 +498,10 @@ impl DirectoryEntry
 
         let diff_size = current_pos - expected_aligned_pos;
 
-        if diff_size != 0
-        {
-            let mut padding : Vec<u8> = Vec::new();
+        if diff_size != 0 {
+            let mut padding: Vec<u8> = Vec::new();
             padding.resize(LOGIC_SIZE - diff_size, 0u8);
-            output_writter.write(&padding)?;
+            output_writter.write_all(&padding)?;
         }
 
         // Restore old position
@@ -472,51 +510,56 @@ impl DirectoryEntry
         Ok(())
     }
 
-    fn write_files<T>(&mut self, output_writter: &mut T) -> std::io::Result<()> where T: Write + Seek
+    fn write_files<T>(&mut self, output_writter: &mut T) -> std::io::Result<()>
+    where
+        T: Write + Seek,
     {
-        for child_directory in &mut self.dir_childs
-        {
+        for child_directory in &mut self.dir_childs {
             child_directory.write_files(output_writter)?;
         }
 
-        for child_file in &mut self.files_childs
-        {
+        for child_file in &mut self.files_childs {
             child_file.write_content(output_writter)?;
         }
         Ok(())
     }
 
-    fn write_as_current<T>(&self, output_writter: &mut T) -> std::io::Result<()> where T: Write
+    fn write_as_current<T>(&self, output_writter: &mut T) -> std::io::Result<()>
+    where
+        T: Write,
     {
         DirectoryEntry::write_entry(self, output_writter, 1)
     }
 
-    fn write_as_parent<T>(&self, output_writter: &mut T) -> std::io::Result<()> where T: Write
+    fn write_as_parent<T>(&self, output_writter: &mut T) -> std::io::Result<()>
+    where
+        T: Write,
     {
         DirectoryEntry::write_entry(self, output_writter, 2)
     }
 
-    fn write_one<T>(&self, output_writter: &mut T) -> std::io::Result<()> where T: Write
+    fn write_one<T>(&self, output_writter: &mut T) -> std::io::Result<()>
+    where
+        T: Write,
     {
         DirectoryEntry::write_entry(self, output_writter, 0)
     }
 }
 
-impl VolumeDescriptor
-{
-    fn get_type_id(&self) -> u8
-    {
-        match self
-        {
+impl VolumeDescriptor {
+    fn get_type_id(&self) -> u8 {
+        match self {
             VolumeDescriptor::Boot => 0,
             VolumeDescriptor::Primary => 1,
             VolumeDescriptor::Supplementary => 2,
             VolumeDescriptor::Volume => 3,
-            VolumeDescriptor::End => 0xff
+            VolumeDescriptor::End => 0xff,
         }
     }
 
-    fn write_volume_header<T>(&mut self, output_writter: &mut T) -> std::io::Result<()> where T: Write
+    fn write_volume_header<T>(&mut self, output_writter: &mut T) -> std::io::Result<()>
+    where
+        T: Write,
     {
         let type_id = self.get_type_id();
         output_writter.write_u8(type_id)?;
@@ -525,28 +568,34 @@ impl VolumeDescriptor
         Ok(())
     }
 
-    fn write_volume<T>(&mut self, output_writter: &mut T, root_dir : &mut DirectoryEntry, path_table_start_lba: u32, size_in_lb: u32) -> std::io::Result<()> where T: Write
+    fn write_volume<T>(
+        &mut self,
+        output_writter: &mut T,
+        root_dir: &mut DirectoryEntry,
+        path_table_start_lba: u32,
+        size_in_lb: u32,
+    ) -> std::io::Result<()>
+    where
+        T: Write,
     {
         self.write_volume_header(output_writter)?;
 
-        match self
-        {
+        match self {
             VolumeDescriptor::Primary => {
                 output_writter.write_u8(0)?;
 
-                let system_identifier : [u8; 32] = [0x20; 32];
+                let system_identifier: [u8; 32] = [0x20; 32];
                 output_writter.write_all(&system_identifier)?;
 
                 output_writter.write_all(b"ISOIMAGE                        ")?;
                 output_writter.write_u64::<LittleEndian>(0)?;
-                
 
                 // Size of the volume in LB
                 write_bothendian! {
                     output_writter.write_u32(size_in_lb)?;
                 }
 
-                let zero_b32 : [u8; 32] = [0; 32];
+                let zero_b32: [u8; 32] = [0; 32];
                 output_writter.write_all(&zero_b32)?;
 
                 // Disc count
@@ -570,7 +619,7 @@ impl VolumeDescriptor
                 }
 
                 // path table location (in lba)
-                let path_table_lba_le = path_table_start_lba;     // System Area + Primary + End
+                let path_table_lba_le = path_table_start_lba; // System Area + Primary + End
                 let path_table_lba_be = path_table_start_lba + 2; // System Area + Primary + End + Path Table LE + Spacing
 
                 output_writter.write_u32::<LittleEndian>(path_table_lba_le)?;
@@ -580,25 +629,25 @@ impl VolumeDescriptor
 
                 root_dir.write_as_current(output_writter)?;
 
-                let volume_set_identifier : [u8; 128] = [0x20; 128];
-                let publisher_identifier : [u8; 128] = [0x20; 128];
-                let data_preparer_identifier : [u8; 128] = [0x20; 128];
-                let application_identifier : [u8; 128] = [0x20; 128];
+                let volume_set_identifier: [u8; 128] = [0x20; 128];
+                let publisher_identifier: [u8; 128] = [0x20; 128];
+                let data_preparer_identifier: [u8; 128] = [0x20; 128];
+                let application_identifier: [u8; 128] = [0x20; 128];
                 output_writter.write_all(&volume_set_identifier)?;
                 output_writter.write_all(&publisher_identifier)?;
                 output_writter.write_all(&data_preparer_identifier)?;
                 output_writter.write_all(&application_identifier)?;
 
-                let copyright_file_identifier : [u8; 38] = [0x20; 38];
-                let abstract_file_identifier  : [u8; 36] = [0x20; 36];
-                let bibliographic_file_identifier : [u8; 37] = [0x20; 37];
+                let copyright_file_identifier: [u8; 38] = [0x20; 38];
+                let abstract_file_identifier: [u8; 36] = [0x20; 36];
+                let bibliographic_file_identifier: [u8; 37] = [0x20; 37];
                 output_writter.write_all(&copyright_file_identifier)?;
                 output_writter.write_all(&abstract_file_identifier)?;
                 output_writter.write_all(&bibliographic_file_identifier)?;
 
                 let utc: DateTime<Utc> = Utc::now();
-                let creation_time : String = utc.format("%Y%m%d%H%M%S00").to_string();
-                let expiration_time : [u8; 16] = [0x30; 16];
+                let creation_time: String = utc.format("%Y%m%d%H%M%S00").to_string();
+                let expiration_time: [u8; 16] = [0x30; 16];
 
                 output_writter.write_all(creation_time.as_bytes())?;
                 output_writter.write_u8(0)?;
@@ -614,25 +663,24 @@ impl VolumeDescriptor
 
                 output_writter.write_u8(0x0)?;
 
-                let application_used : [u8; 512] = [0x20; 512];
+                let application_used: [u8; 512] = [0x20; 512];
                 output_writter.write_all(&application_used)?;
-                
-                let reserved : [u8; 653] = [0x0; 653];
+
+                let reserved: [u8; 653] = [0x0; 653];
                 output_writter.write_all(&reserved)?;
-            },
+            }
             VolumeDescriptor::End => {
-                let empty_data : [u8; 2041] = [0; 2041];
+                let empty_data: [u8; 2041] = [0; 2041];
                 output_writter.write_all(&empty_data)?;
-            },
-            _ => unimplemented!()
+            }
+            _ => unimplemented!(),
         }
         Ok(())
     }
 }
 
-fn generate_volume_descriptors() -> Vec<VolumeDescriptor>
-{
-    let mut res : Vec<VolumeDescriptor> = Vec::new();
+fn generate_volume_descriptors() -> Vec<VolumeDescriptor> {
+    let mut res: Vec<VolumeDescriptor> = Vec::new();
 
     res.push(VolumeDescriptor::Primary);
     res.push(VolumeDescriptor::End);
@@ -640,33 +688,31 @@ fn generate_volume_descriptors() -> Vec<VolumeDescriptor>
     res
 }
 
-fn print_tree(tree : &DirectoryEntry)
-{
-    for entry in &tree.dir_childs
-    {
-        println!("{:?}: {} {} ({:x})", entry.path, entry.parent_index, entry.path_table_index, entry.lba);
+fn print_tree(tree: &DirectoryEntry) {
+    for entry in &tree.dir_childs {
+        println!(
+            "{:?}: {} {} ({:x})",
+            entry.path, entry.parent_index, entry.path_table_index, entry.lba
+        );
     }
 
-    for entry in &tree.dir_childs
-    {
+    for entry in &tree.dir_childs {
         print_tree(entry);
     }
 }
 
-fn create_grub_iso(output_path : String, input_directory : String) -> std::io::Result<()>
-{
-
+fn create_grub_iso(output_path: String, input_directory: String) -> std::io::Result<()> {
     let volume_descriptor_list = generate_volume_descriptors();
 
     let mut out_file = File::create(output_path)?;
 
     // First we have the System Area, that is unused
-    let buffer : [u8; LOGIC_SIZE * 0x10] = [0; LOGIC_SIZE * 0x10];
+    let buffer: [u8; LOGIC_SIZE * 0x10] = [0; LOGIC_SIZE * 0x10];
 
-    let mut current_lba : u32 = 0x10 + 1 + (volume_descriptor_list.len() as u32);
+    let mut current_lba: u32 = 0x10 + 1 + (volume_descriptor_list.len() as u32);
 
     let path_table_start_lba = current_lba;
-    
+
     // Reserve 4 LBA for path tables (add some spacing after table)
     current_lba += 4;
 
@@ -676,7 +722,10 @@ fn create_grub_iso(output_path : String, input_directory : String) -> std::io::R
     assign_directory_identifiers(&mut tree, &mut path_table_index, current_lba - 1);
     tree.parent_index = 1;
     tree.lba = current_lba;
-    println!("{:?}: {} {} ({:x})", tree.path, tree.parent_index, tree.path_table_index, tree.lba);
+    println!(
+        "{:?}: {} {} ({:x})",
+        tree.path, tree.parent_index, tree.path_table_index, tree.lba
+    );
     print_tree(&tree);
 
     current_lba += path_table_index;
@@ -685,13 +734,12 @@ fn create_grub_iso(output_path : String, input_directory : String) -> std::io::R
     reserve_file_space(&mut tree, &mut current_lba);
 
     out_file.write_all(&buffer)?;
-    for mut volume in volume_descriptor_list
-    {
+    for mut volume in volume_descriptor_list {
         volume.write_volume(&mut out_file, &mut tree, path_table_start_lba, current_lba)?;
     }
 
     // FIXME: what is this and why do I need it???? checksum infos??
-    let empty_mki_section : [u8; 2044] = [0; 2044];
+    let empty_mki_section: [u8; 2044] = [0; 2044];
     out_file.write_all(b"MKI ")?;
     out_file.write_all(&empty_mki_section)?;
 
