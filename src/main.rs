@@ -555,7 +555,6 @@ impl VolumeDescriptor
                 output_writter.write_u16::<BigEndian>(0x800)?;
 
                 let path_table_size = root_dir.get_path_table_size();
-                // TODO: path table size
                 output_writter.write_u32::<LittleEndian>(path_table_size)?;
                 output_writter.write_u32::<BigEndian>(path_table_size)?;
 
@@ -653,7 +652,6 @@ fn create_grub_iso(output_path : String, input_directory : String) -> std::io::R
     // First we have the System Area, that is unused
     let buffer : [u8; 0x8000] = [0; 0x8000];
 
-    // TODO: Path Table
     let mut current_lba : u32 = 0x10 + 1 + (volume_descriptor_list.len() as u32);
 
     let path_table_start_lba = current_lba;
@@ -686,7 +684,6 @@ fn create_grub_iso(output_path : String, input_directory : String) -> std::io::R
     out_file.write_all(b"MKI ")?;
     out_file.write_all(&empty_mki_section)?;
 
-    // TODO: Path table LE/BE
     tree.write_path_table::<File, LittleEndian>(&mut out_file, path_table_start_lba)?;
     tree.write_path_table::<File, BigEndian>(&mut out_file, path_table_start_lba + 1)?;
     tree.write_extent(&mut out_file, None)?;
