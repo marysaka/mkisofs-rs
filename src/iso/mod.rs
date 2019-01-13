@@ -17,15 +17,16 @@ use directory_entry::DirectoryEntry;
 use utils::LOGIC_SIZE_U32;
 use volume_descriptor::VolumeDescriptor;
 
-fn assign_directory_identifiers(tree: &mut DirectoryEntry, last_index: &mut u32, current_lba: u32) {
+fn assign_directory_identifiers(tree: &mut DirectoryEntry, last_index: &mut u32, last_lba: &mut u32) {
     if *last_index == 0 {
         tree.parent_index = *last_index;
         tree.path_table_index = *last_index + 1;
 
         *last_index = tree.path_table_index;
     } else {
-        tree.lba = current_lba + tree.path_table_index;
+        tree.lba = *last_lba;
     }
+    *last_lba += tree.get_extent_size_in_lb();
 
     for entry in &mut tree.dir_childs {
         entry.parent_index = tree.path_table_index;
@@ -35,7 +36,7 @@ fn assign_directory_identifiers(tree: &mut DirectoryEntry, last_index: &mut u32,
     }
 
     for entry in &mut tree.dir_childs {
-        assign_directory_identifiers(entry, last_index, current_lba);
+        assign_directory_identifiers(entry, last_index, last_lba);
     }
 }
 
@@ -78,11 +79,14 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
     let mut tree = DirectoryEntry::new(PathBuf::from(&opt.input_directory))?;
     let mut path_table_index = 0;
 
-    assign_directory_identifiers(&mut tree, &mut path_table_index, current_lba - 1);
+    let mut tmp_lba = current_lba;
+
+    assign_directory_identifiers(&mut tree, &mut path_table_index, &mut tmp_lba);
     tree.parent_index = 1;
     tree.lba = current_lba;
+    tree.print();
 
-    current_lba += path_table_index;
+    current_lba = tmp_lba;
     current_lba += 1;
 
     reserve_file_space(&mut tree, &mut current_lba);

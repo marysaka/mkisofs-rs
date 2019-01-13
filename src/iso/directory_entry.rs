@@ -36,15 +36,15 @@ impl DirectoryEntry {
             .file_name()
             .unwrap()
             .to_str()
-            .unwrap()
-            .to_uppercase();
+            .unwrap();
+            //.to_uppercase();
 
+        let file_name_fixed = utils::convert_name(file_name);
         let file_identifier = match directory_type {
             1 => &[0u8],
             2 => &[1u8],
             _ => {
-                // TODO: CONVERT IT TO VALID DATA
-                file_name.as_bytes()
+                &file_name_fixed[..]
             }
         };
 
@@ -103,34 +103,61 @@ impl DirectoryEntry {
     }
 
     pub fn get_path_table_size(&self) -> u32 {
-        let mut res = 0x8u32;
+        let mut res = 0u32;
 
         let file_name = self
             .path
             .file_name()
             .unwrap()
             .to_str()
-            .unwrap()
-            .to_uppercase();
-        let file_identifier = match self.path_table_index {
-            1 => &[0u8],
-            _ => {
-                // TODO: CONVERT IT TO VALID DATA
-                file_name.as_bytes()
-            }
-        };
-        let mut file_identifier_len = file_identifier.len();
-        if (file_identifier_len % 2) != 0 {
-            file_identifier_len += 1;
-        }
+            .unwrap();
 
-        res += file_identifier_len as u32;
+        let directory_type = if self.path_table_index == 1 {
+            1
+        } else { 0 };
+
+        res += utils::get_entry_size(0x8, file_name, directory_type, 0);
 
         for entry in &self.dir_childs {
             res += entry.get_path_table_size();
         }
 
         res
+    }
+
+    pub fn get_extent_size(&self) -> u32
+    {
+        let mut res = 0u32;
+        res += 0x22 * 2; // '.' and '..'
+
+        for entry in &self.dir_childs {
+            let file_name = entry
+                .path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap();
+
+            res += utils::get_entry_size(0x21, file_name, 0, 1);
+        }
+
+        for entry in &self.files_childs {
+            let file_name = entry
+                .path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap();
+
+            res += utils::get_entry_size(0x21, file_name, 0, 1);
+        }
+
+        res
+    }
+
+    pub fn get_extent_size_in_lb(&self) -> u32
+    {
+        (utils::align_up(self.get_extent_size() as i32, LOGIC_SIZE_U32 as i32) as u32) / LOGIC_SIZE_U32
     }
 
     fn write_path_table_entry<T, Order: ByteOrder>(
@@ -146,14 +173,14 @@ impl DirectoryEntry {
             .file_name()
             .unwrap()
             .to_str()
-            .unwrap()
-            .to_uppercase();
+            .unwrap();
+
+        let file_name_fixed = utils::convert_name(file_name);        
 
         let file_identifier = match directory_type {
             1 => &[0u8],
             _ => {
-                // TODO: CONVERT IT TO VALID DATA
-                file_name.as_bytes()
+                &file_name_fixed[..]
             }
         };
 
@@ -332,8 +359,8 @@ impl DirectoryEntry {
 
     pub fn print(&self) {
         println!(
-            "{:?}: {} {} ({:x})",
-            self.path, self.parent_index, self.path_table_index, self.lba
+            "{:?}: {} {} ({:x}, size: {:x})",
+            self.path, self.parent_index, self.path_table_index, self.lba, self.get_extent_size_in_lb()
         );
 
         for entry in &self.dir_childs {

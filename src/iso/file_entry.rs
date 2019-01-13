@@ -1,4 +1,5 @@
 use crate::iso::utils::{LOGIC_SIZE, LOGIC_SIZE_I64, LOGIC_SIZE_U32};
+use crate::iso::utils;
 
 use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 use chrono::prelude::*;
@@ -23,15 +24,13 @@ impl FileEntry {
     where
         T: Write,
     {
-        // TODO: CONVERT IT TO VALID DATA
         let file_name = self
             .path
             .file_name()
             .unwrap()
             .to_str()
-            .unwrap()
-            .to_uppercase();
-        let file_identifier = file_name.as_bytes();
+            .unwrap();
+        let file_identifier = utils::convert_name(file_name);
         let file_identifier_len = file_identifier.len() + 2;
 
         let file_identifier_padding = if (file_identifier_len % 2) == 0 { 1 } else { 0 };
@@ -74,7 +73,7 @@ impl FileEntry {
         }
 
         output_writter.write_u8(file_identifier_len as u8)?;
-        output_writter.write_all(file_identifier)?;
+        output_writter.write_all(&file_identifier[..])?;
         output_writter.write_all(b";1")?;
 
         // padding if even
