@@ -15,6 +15,12 @@ use std::fs::DirEntry;
 use std::fs::Metadata;
 use std::path::PathBuf;
 
+const LOGIC_SIZE: usize = 0x800;
+const LOGIC_SIZE_I64: i64 = 0x800;
+const LOGIC_SIZE_U32: u32 = 0x800;
+const LOGIC_SIZE_U16: u16 = 0x800;
+
+
 #[derive(Debug, Clone)]
 struct FileEntry
 {
@@ -72,7 +78,7 @@ fn construct_directory(path : PathBuf) -> std::io::Result<DirectoryEntry>
         if entry_meta.is_dir() {
             dir_childs.push(construct_directory(entry.path())?);
         } else if entry_meta.is_file() {
-            files_childs.push(FileEntry { path: entry.path(), size: entry_meta.len() as usize, lba: 0, aligned_size: align_up(entry_meta.len() as i32, 0x800) as usize})
+            files_childs.push(FileEntry { path: entry.path(), size: entry_meta.len() as usize, lba: 0, aligned_size: align_up(entry_meta.len() as i32, LOGIC_SIZE_U32 as i32) as usize})
         }
     }
     Ok(DirectoryEntry {path_table_index: 0, parent_index: 0, path: dir_path, dir_childs, files_childs, lba: 0})
@@ -115,9 +121,9 @@ fn reserve_file_space(directory_entry : &mut DirectoryEntry, current_lba : &mut 
 
     for child_file in &mut directory_entry.files_childs
     {
-        let lba_count = (child_file.size + 0x800) / 0x800;
+        let lba_count = ((child_file.size as u32) + LOGIC_SIZE_U32) / LOGIC_SIZE_U32;
         child_file.lba = *current_lba;
-        *current_lba += lba_count as u32;
+        *current_lba += lba_count ;
     }
 }
 
@@ -131,7 +137,7 @@ enum VolumeDescriptor
     End
 }
 
-macro_rules! write_multiendian {
+macro_rules! write_bothendian {
     ($($writer:ident . $write_fn:ident($value:expr)?;)*) => {
         $($writer.$write_fn::<LittleEndian>($value)?;)*
         $($writer.$write_fn::<BigEndian>($value)?;)*
@@ -157,14 +163,18 @@ impl FileEntry
         output_writter.write_u8(entry_size)?;
 
         // Extended Attribute Record length. 
+        // TODO Rock Ridge
         output_writter.write_u8(0u8)?;
 
-        // Location of extent (LBA) in both-endian format. 
-        output_writter.write_u32::<LittleEndian>(self.lba)?;
-        output_writter.write_u32::<BigEndian>(self.lba)?;
+        // Location of extent (in LB)
+        write_bothendian! {
+            output_writter.write_u32(self.lba)?;
+        }
 
-        output_writter.write_u32::<LittleEndian>(self.size as u32)?;
-        output_writter.write_u32::<BigEndian>(self.size as u32)?;
+        // Extent size
+        write_bothendian! {
+            output_writter.write_u32(self.size as u32)?;
+        }
 
         let record_datetime: DateTime<Utc> = Utc::now();
         output_writter.write_u8((record_datetime.year() - 1900) as u8)?;
@@ -181,8 +191,9 @@ impl FileEntry
         output_writter.write_u8(0x0u8)?;
         output_writter.write_u8(0x0u8)?;
 
-        output_writter.write_u16::<LittleEndian>(0x1)?;
-        output_writter.write_u16::<BigEndian>(0x1)?;
+        write_bothendian! {
+            output_writter.write_u16(0x1)?;
+        }
 
         output_writter.write_u8(file_identifier_len as u8)?;
         output_writter.write_all(file_identifier)?;
@@ -201,7 +212,7 @@ impl FileEntry
         let old_pos = output_writter.seek(SeekFrom::Current(0))?;
 
         // Seek to the correct LBA
-        output_writter.seek(SeekFrom::Start((self.lba * 0x800) as u64))?;
+        output_writter.seek(SeekFrom::Start((self.lba * LOGIC_SIZE_U32) as u64))?;
 
         // TODO support other content provider
         let mut file = File::open(&self.path)?;
@@ -209,14 +220,14 @@ impl FileEntry
         io::copy(&mut file, output_writter)?;
 
         let current_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
-        let expected_aligned_pos = ((current_pos as i64) & -0x800) as usize;
+        let expected_aligned_pos = ((current_pos as i64) & -LOGIC_SIZE_I64) as usize;
 
         let diff_size = current_pos - expected_aligned_pos;
 
         if diff_size != 0
         {
             let mut padding : Vec<u8> = Vec::new();
-            padding.resize(0x800 - diff_size, 0u8);
+            padding.resize(LOGIC_SIZE - diff_size, 0u8);
             output_writter.write(&padding)?;
         }
 
@@ -256,15 +267,19 @@ impl DirectoryEntry
 
         output_writter.write_u8(entry_size)?;
 
-        // Extended Attribute Record length. 
+        // Extended Attribute Record length.
+        // TODO: Rock Ridge
         output_writter.write_u8(0u8)?;
 
-        // Location of extent (LBA) in both-endian format. 
-        output_writter.write_u32::<LittleEndian>(directory_entry.lba)?;
-        output_writter.write_u32::<BigEndian>(directory_entry.lba)?;
+        // Location of extent (in LB)
+        write_bothendian! {
+            output_writter.write_u32(directory_entry.lba)?;
+        }
 
-        output_writter.write_u32::<LittleEndian>(0x800)?;
-        output_writter.write_u32::<BigEndian>(0x800)?;
+        // Extent size (size of an LB)
+        write_bothendian! {
+            output_writter.write_u32(LOGIC_SIZE_U32)?;
+        }
 
         let record_datetime: DateTime<Utc> = Utc::now();
         output_writter.write_u8((record_datetime.year() - 1900) as u8)?;
@@ -281,8 +296,9 @@ impl DirectoryEntry
         output_writter.write_u8(0x0u8)?;
         output_writter.write_u8(0x0u8)?;
 
-        output_writter.write_u16::<LittleEndian>(0x1)?;
-        output_writter.write_u16::<BigEndian>(0x1)?;
+        write_bothendian! {
+            output_writter.write_u16(0x1)?;
+        }
 
         output_writter.write_u8(file_identifier_len as u8)?;
         output_writter.write_all(file_identifier)?;
@@ -293,18 +309,6 @@ impl DirectoryEntry
         }
 
         Ok(())
-    }
-
-    fn len(&self) -> u32
-    {
-        let mut res = 0;
-
-        for entry in &self.dir_childs
-        {
-            res += entry.len();
-        }
-
-        res
     }
 
     fn get_path_table_size(&self) -> u32
@@ -382,7 +386,7 @@ impl DirectoryEntry
         let old_pos = output_writter.seek(SeekFrom::Current(0))?;
 
         // Seek to the correct LBA
-        output_writter.seek(SeekFrom::Start((path_table_pos * 0x800) as u64))?;
+        output_writter.seek(SeekFrom::Start((path_table_pos * LOGIC_SIZE_U32) as u64))?;
 
         let old_pos_current_context = output_writter.seek(SeekFrom::Current(0))?;
 
@@ -394,7 +398,7 @@ impl DirectoryEntry
 
         // Pad to LBA size
         let current_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
-        let expected_aligned_pos = ((current_pos as i64) & -0x800) as usize;
+        let expected_aligned_pos = ((current_pos as i64) & -LOGIC_SIZE_I64) as usize;
 
         let diff_size = current_pos - expected_aligned_pos;
 
@@ -404,7 +408,7 @@ impl DirectoryEntry
         if diff_size != 0
         {
             let mut padding : Vec<u8> = Vec::new();
-            padding.resize(0x800 - diff_size, 0u8);
+            padding.resize(LOGIC_SIZE - diff_size, 0u8);
             output_writter.write(&padding)?;
         }
 
@@ -419,7 +423,7 @@ impl DirectoryEntry
         let old_pos = output_writter.seek(SeekFrom::Current(0))?;
 
         // Seek to the correct LBA
-        output_writter.seek(SeekFrom::Start((self.lba * 0x800) as u64))?;
+        output_writter.seek(SeekFrom::Start((self.lba * LOGIC_SIZE_U32) as u64))?;
 
         self.write_as_current(output_writter)?;
 
@@ -451,14 +455,14 @@ impl DirectoryEntry
 
         // Pad to LBA size
         let current_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
-        let expected_aligned_pos = ((current_pos as i64) & -0x800) as usize;
+        let expected_aligned_pos = ((current_pos as i64) & -LOGIC_SIZE_I64) as usize;
 
         let diff_size = current_pos - expected_aligned_pos;
 
         if diff_size != 0
         {
             let mut padding : Vec<u8> = Vec::new();
-            padding.resize(0x800 - diff_size, 0u8);
+            padding.resize(LOGIC_SIZE - diff_size, 0u8);
             output_writter.write(&padding)?;
         }
 
@@ -536,27 +540,34 @@ impl VolumeDescriptor
                 output_writter.write_all(b"ISOIMAGE                        ")?;
                 output_writter.write_u64::<LittleEndian>(0)?;
                 
-                output_writter.write_u32::<LittleEndian>(size_in_lb)?;
-                output_writter.write_u32::<BigEndian>(size_in_lb)?;
+
+                // Size of the volume in LB
+                write_bothendian! {
+                    output_writter.write_u32(size_in_lb)?;
+                }
 
                 let zero_b32 : [u8; 32] = [0; 32];
                 output_writter.write_all(&zero_b32)?;
 
                 // Disc count
-                output_writter.write_u16::<LittleEndian>(1)?;
-                output_writter.write_u16::<BigEndian>(1)?;
+                write_bothendian! {
+                    output_writter.write_u16(1)?;
+                }
 
                 // Disc id
-                output_writter.write_u16::<LittleEndian>(1)?;
-                output_writter.write_u16::<BigEndian>(1)?;
+                write_bothendian! {
+                    output_writter.write_u16(1)?;
+                }
 
                 // logic size: 2KB
-                output_writter.write_u16::<LittleEndian>(0x800)?;
-                output_writter.write_u16::<BigEndian>(0x800)?;
+                write_bothendian! {
+                    output_writter.write_u16(LOGIC_SIZE_U16)?;
+                }
 
                 let path_table_size = root_dir.get_path_table_size();
-                output_writter.write_u32::<LittleEndian>(path_table_size)?;
-                output_writter.write_u32::<BigEndian>(path_table_size)?;
+                write_bothendian! {
+                    output_writter.write_u32(path_table_size)?;
+                }
 
                 // path table location (in lba)
                 let path_table_lba_le = path_table_start_lba;     // System Area + Primary + End
@@ -650,7 +661,7 @@ fn create_grub_iso(output_path : String, input_directory : String) -> std::io::R
     let mut out_file = File::create(output_path)?;
 
     // First we have the System Area, that is unused
-    let buffer : [u8; 0x8000] = [0; 0x8000];
+    let buffer : [u8; LOGIC_SIZE * 0x10] = [0; LOGIC_SIZE * 0x10];
 
     let mut current_lba : u32 = 0x10 + 1 + (volume_descriptor_list.len() as u32);
 
