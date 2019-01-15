@@ -13,6 +13,7 @@ use directory_entry::DirectoryEntry;
 use file_entry::{FileEntry, FileType};
 use std::fs::File;
 use std::io::prelude::*;
+use std::io::Cursor;
 use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -152,7 +153,41 @@ fn fill_boot_catalog(tree: &mut DirectoryEntry, opt: &mut option::Opt) -> std::i
     Ok(())
 }
 
-pub fn write_system_area<T>(output_writter: &mut T, opt: &option::Opt) -> std::io::Result<()>
+fn patch_boot_image(tree: &mut DirectoryEntry, opt: &mut option::Opt) -> std::io::Result<()> {
+    let value = opt.eltorito_opt.eltorito_boot.clone().unwrap();
+    let file: &mut FileEntry = tree.get_file(&value).unwrap();
+
+    // We need to copy the file to a buffer and change the file type internally to be able to patch it
+    let mut content: Box<Read> = file.open_content_provider();
+    let mut buff: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+    std::io::copy(&mut content, &mut buff)?;
+
+    // Path the content now
+    buff.seek(SeekFrom::Start(0x8))?;
+
+    // LBA of primary volume descriptor (always 0x10 in our case)
+    buff.write_u32::<LittleEndian>(0x10)?;
+
+    // LBA of boot file.
+    buff.write_u32::<LittleEndian>(file.lba)?;
+
+    // Length of boot file.
+    buff.write_u32::<LittleEndian>(file.size as u32)?;
+
+    // Checksum (actually ignored by GRUB2)
+    // FIXME: should we implement it?
+    buff.write_u32::<LittleEndian>(0x0)?;
+
+    file.file_type = FileType::Buffer {
+        name: file.get_file_name(),
+        data: buff.into_inner(),
+    };
+    file.update();
+
+    Ok(())
+}
+
+fn write_system_area<T>(output_writter: &mut T, opt: &option::Opt) -> std::io::Result<()>
 where
     T: Write + Seek,
 {
@@ -217,6 +252,10 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
 
     if opt.eltorito_opt.eltorito_boot.is_some() {
         fill_boot_catalog(&mut tree, opt)?;
+    }
+
+    if opt.eltorito_opt.boot_info_table {
+        patch_boot_image(&mut tree, opt)?;
     }
 
     write_system_area(&mut out_file, opt)?;

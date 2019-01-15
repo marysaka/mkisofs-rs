@@ -4,7 +4,7 @@ use structopt::StructOpt;
 #[derive(StructOpt, Debug)]
 #[structopt(
     name = "mkisofs-rs",
-    about = "create an hybrid ISO-9660 filesystem-image with optional Rock Ridge attributes."
+    about = "create an hybrid ISO-9660 filesystem-image with optional Rock Ridge attributes (Rock Ridge still TODO)."
 )]
 pub struct Opt {
     #[structopt(long, short = "o", help = "Set output file name")]
@@ -41,7 +41,7 @@ pub struct ElToritoOpt {
 
     #[structopt(
         long = "boot-info-table",
-        help = "Patch boot image with info table (TODO)"
+        help = "Patch boot image with info table"
     )]
     pub boot_info_table: bool,
 }
