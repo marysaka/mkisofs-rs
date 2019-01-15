@@ -2,6 +2,7 @@ use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 use chrono::prelude::*;
 
 use crate::iso::directory_entry::DirectoryEntry;
+use crate::iso::file_entry::FileEntry;
 use crate::iso::utils::LOGIC_SIZE_U16;
 
 use std;
@@ -52,6 +53,20 @@ impl VolumeDescriptor {
         self.write_volume_header(output_writter)?;
 
         match self {
+            VolumeDescriptor::Boot => {
+                // TODO: write it correctly
+                output_writter.write_all(b"EL TORITO SPECIFICATION")?;
+
+                let catalog_file: &FileEntry = root_dir.get_file("boot.cat").unwrap();
+
+                let empty_data: [u8; 0x29] = [0; 0x29];
+                output_writter.write_all(&empty_data)?;
+
+                output_writter.write_u32::<LittleEndian>(catalog_file.lba)?;
+
+                let empty_data_2: [u8; 0x7b5] = [0; 0x7b5];
+                output_writter.write_all(&empty_data_2)?;
+            }
             VolumeDescriptor::Primary => {
                 output_writter.write_u8(0)?;
 

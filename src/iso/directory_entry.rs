@@ -1,4 +1,4 @@
-use crate::iso::file_entry::FileEntry;
+use crate::iso::file_entry::{FileEntry, FileType};
 use crate::iso::utils;
 use crate::iso::utils::{LOGIC_SIZE, LOGIC_SIZE_I64, LOGIC_SIZE_U32};
 use byteorder::{BigEndian, ByteOrder, LittleEndian, WriteBytesExt};
@@ -31,35 +31,26 @@ impl DirectoryEntry {
     where
         T: Write + Seek,
     {
-
         let current_pos = output_writter.seek(SeekFrom::Current(0))? as i32;
         let expected_aligned_pos = utils::align_up(current_pos, LOGIC_SIZE_U32 as i32);
 
         let diff_size = expected_aligned_pos - current_pos;
         let file_entry_size = directory_entry.get_entry_size() as i32;
 
-        if file_entry_size > diff_size && diff_size != 0
-        {
+        if file_entry_size > diff_size && diff_size != 0 {
             let mut padding: Vec<u8> = Vec::new();
             padding.resize(diff_size as usize, 0u8);
             output_writter.write_all(&padding)?;
         }
 
-        let file_name = directory_entry
-            .path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap();
-            //.to_uppercase();
+        let file_name = directory_entry.path.file_name().unwrap().to_str().unwrap();
+        //.to_uppercase();
 
         let file_name_fixed = utils::convert_name(file_name);
         let file_identifier = match directory_type {
             1 => &[0u8],
             2 => &[1u8],
-            _ => {
-                &file_name_fixed[..]
-            }
+            _ => &file_name_fixed[..],
         };
 
         let file_identifier_len = file_identifier.len();
@@ -119,16 +110,9 @@ impl DirectoryEntry {
     pub fn get_path_table_size(&self) -> u32 {
         let mut res = 0u32;
 
-        let file_name = self
-            .path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let file_name = self.path.file_name().unwrap().to_str().unwrap();
 
-        let directory_type = if self.path_table_index == 1 {
-            1
-        } else { 0 };
+        let directory_type = if self.path_table_index == 1 { 1 } else { 0 };
 
         res += utils::get_entry_size(0x8, file_name, directory_type, 0);
 
@@ -139,8 +123,7 @@ impl DirectoryEntry {
         res
     }
 
-    pub fn get_extent_size(&self) -> u32
-    {
+    pub fn get_extent_size(&self) -> u32 {
         let mut res = 0u32;
         res += 0x22 * 2; // '.' and '..'
 
@@ -156,19 +139,14 @@ impl DirectoryEntry {
     }
 
     pub fn get_entry_size(&self) -> u32 {
-        let file_name = self
-            .path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let file_name = self.path.file_name().unwrap().to_str().unwrap();
 
         utils::get_entry_size(0x21, file_name, 0, 1)
     }
 
-    pub fn get_extent_size_in_lb(&self) -> u32
-    {
-        (utils::align_up(self.get_extent_size() as i32, LOGIC_SIZE_U32 as i32) as u32) / LOGIC_SIZE_U32
+    pub fn get_extent_size_in_lb(&self) -> u32 {
+        (utils::align_up(self.get_extent_size() as i32, LOGIC_SIZE_U32 as i32) as u32)
+            / LOGIC_SIZE_U32
     }
 
     fn write_path_table_entry<T, Order: ByteOrder>(
@@ -179,20 +157,13 @@ impl DirectoryEntry {
     where
         T: Write,
     {
-        let file_name = directory_entry
-            .path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let file_name = directory_entry.path.file_name().unwrap().to_str().unwrap();
 
-        let file_name_fixed = utils::convert_name(file_name);        
+        let file_name_fixed = utils::convert_name(file_name);
 
         let file_identifier = match directory_type {
             1 => &[0u8],
-            _ => {
-                &file_name_fixed[..]
-            }
+            _ => &file_name_fixed[..],
         };
 
         let file_identifier_len = file_identifier.len();
@@ -368,10 +339,67 @@ impl DirectoryEntry {
         DirectoryEntry::write_entry(self, output_writter, 0)
     }
 
+    pub fn get_directory(&mut self, dir_name: &str) -> Option<&mut DirectoryEntry> {
+        let mut res = None;
+
+        for child in &mut self.dir_childs {
+            let file_name = child.path.file_name().unwrap().to_str().unwrap();
+
+            if file_name == dir_name {
+                res = Some(child);
+                break;
+            }
+        }
+        res
+    }
+
+    pub fn get_file(&mut self, path: &str) -> Option<&mut FileEntry> {
+        let mut cut_path: Vec<&str> = path.split('/').collect();
+
+        let mut directory_entry: Option<&mut DirectoryEntry> = Some(self);
+
+        if cut_path.len() != 1 {
+            directory_entry = directory_entry.unwrap().get_directory(cut_path[0]);
+
+            directory_entry.as_ref()?;
+            cut_path.remove(0);
+        }
+
+        while cut_path.len() != 1 {
+            directory_entry = directory_entry.unwrap().get_directory(cut_path[0]);
+            
+            directory_entry.as_ref()?;
+            cut_path.remove(0);
+        }
+
+        let dir = directory_entry.unwrap();
+        let mut res = None;
+
+        for child in &mut dir.files_childs {
+            let name = child.get_file_name();
+
+            if name == cut_path[0] {
+                res = Some(child);
+                break;
+            }
+        }
+
+        res
+    }
+
+    pub fn add_file(&mut self, file: FileEntry) -> &FileEntry {
+        self.files_childs.push(file);
+        self.files_childs.last().unwrap()
+    }
+
     pub fn print(&self) {
         println!(
             "{:?}: {} {} ({:x}, size: {:x})",
-            self.path, self.parent_index, self.path_table_index, self.lba, self.get_extent_size_in_lb()
+            self.path,
+            self.parent_index,
+            self.path_table_index,
+            self.lba,
+            self.get_extent_size_in_lb()
         );
 
         for entry in &self.dir_childs {
@@ -393,7 +421,7 @@ impl DirectoryEntry {
                 dir_childs.push(DirectoryEntry::new(entry.path())?);
             } else if entry_meta.is_file() {
                 files_childs.push(FileEntry {
-                    path: entry.path(),
+                    file_type: FileType::Regular { path: entry.path() },
                     size: entry_meta.len() as usize,
                     lba: 0,
                     aligned_size: utils::align_up(entry_meta.len() as i32, LOGIC_SIZE_U32 as i32)

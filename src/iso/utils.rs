@@ -1,6 +1,7 @@
 pub const LOGIC_SIZE: usize = 0x800;
 pub const LOGIC_SIZE_I64: i64 = 0x800;
 pub const LOGIC_SIZE_U32: u32 = 0x800;
+pub const SECTOR_SIZE: u32 = 0x200;
 pub const LOGIC_SIZE_U16: u16 = 0x800;
 
 pub fn align_up(value: i32, padding: i32) -> i32 {
@@ -32,22 +33,23 @@ pub fn convert_name(value: &str) -> Vec<u8> {
     result.into_bytes()
 }
 
-pub fn get_entry_size(base_size: u32, file_name: &str, directory_type: u32, padding_type: usize) -> u32
-{
+pub fn get_entry_size(
+    base_size: u32,
+    file_name: &str,
+    directory_type: u32,
+    padding_type: usize,
+) -> u32 {
     let file_name_corrected = convert_name(file_name);
     let file_identifier = match directory_type {
         1 => &[0u8],
         2 => &[1u8],
-        _ => {
-            &file_name_corrected[..]
-        }
+        _ => &file_name_corrected[..],
     };
     let mut file_identifier_len = file_identifier.len();
 
     if file_identifier_len % 2 != padding_type {
         file_identifier_len += 1;
     }
-
 
     base_size + file_identifier_len as u32
 }
