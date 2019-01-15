@@ -9,14 +9,15 @@ use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 
 use std;
 
-use std::fs::File;
-use std::io::prelude::*;
-use std::path::PathBuf;
-
 use directory_entry::DirectoryEntry;
 use file_entry::{FileEntry, FileType};
-use utils::LOGIC_SIZE_U32;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::SeekFrom;
+use std::path::PathBuf;
+use std::str::FromStr;
 use utils::SECTOR_SIZE;
+use utils::{LOGIC_SIZE, LOGIC_SIZE_U32};
 use volume_descriptor::VolumeDescriptor;
 
 fn assign_directory_identifiers(
@@ -151,13 +152,42 @@ fn fill_boot_catalog(tree: &mut DirectoryEntry, opt: &mut option::Opt) -> std::i
     Ok(())
 }
 
+pub fn write_system_area<T>(output_writter: &mut T, opt: &option::Opt) -> std::io::Result<()>
+where
+    T: Write + Seek,
+{
+    let old_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
+
+    if opt.embedded_boot.is_some() {
+        let embedded_boot = opt.embedded_boot.clone().unwrap();
+        let path: PathBuf = PathBuf::from_str(&embedded_boot).unwrap();
+        if path.metadata().unwrap().len() > (LOGIC_SIZE * 0x10) as u64 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "generic boot file is bigger than 32768 bytes!",
+            ));
+        }
+        let mut embedded_boot_file = File::open(path)?;
+        std::io::copy(&mut embedded_boot_file, output_writter)?;
+    }
+
+    // Pad to 0x8000 if needed
+    let current_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
+    let diff_size = current_pos - old_pos;
+
+    if diff_size != LOGIC_SIZE * 0x10 {
+        let mut padding: Vec<u8> = Vec::new();
+        padding.resize(LOGIC_SIZE * 0x10 - diff_size, 0u8);
+        output_writter.write_all(&padding)?;
+    }
+
+    Ok(())
+}
+
 pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
     let volume_descriptor_list = generate_volume_descriptors(opt);
 
     let mut out_file = File::create(&opt.output)?;
-
-    // First we have the System Area, that is unused
-    let buffer: [u8; utils::LOGIC_SIZE * 0x10] = [0; utils::LOGIC_SIZE * 0x10];
 
     let mut current_lba: u32 = 0x10 + 1 + (volume_descriptor_list.len() as u32);
 
@@ -189,7 +219,8 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
         fill_boot_catalog(&mut tree, opt)?;
     }
 
-    out_file.write_all(&buffer)?;
+    write_system_area(&mut out_file, opt)?;
+
     for mut volume in volume_descriptor_list {
         volume.write_volume(&mut out_file, &mut tree, path_table_start_lba, current_lba)?;
     }

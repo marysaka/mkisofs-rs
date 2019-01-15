@@ -16,7 +16,7 @@ pub struct Opt {
     #[structopt(
         long = "generic-boot",
         short = "G",
-        help = "Copy at most 32768 bytes from the given disk file to the very start of the ISO image (TODO)",
+        help = "Copy at most 32768 bytes from the given disk file to the very start of the ISO image",
         raw(aliases = r#"&["embedded-boot"]"#, next_line_help = "true")
     )]
     pub embedded_boot: Option<String>,
@@ -39,8 +39,6 @@ pub struct ElToritoOpt {
     #[structopt(long = "no-boot", help = "Boot image is not bootable")]
     pub no_boot: bool,
 
-    //#[structopt(long = "hard-disk-boot", help = "Boot image is a hard disk image (Unsupported)")]
-    //hard_disk_boot: bool,
     #[structopt(
         long = "boot-info-table",
         help = "Patch boot image with info table (TODO)"

@@ -367,7 +367,7 @@ impl DirectoryEntry {
 
         while cut_path.len() != 1 {
             directory_entry = directory_entry.unwrap().get_directory(cut_path[0]);
-            
+
             directory_entry.as_ref()?;
             cut_path.remove(0);
         }
