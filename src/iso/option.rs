@@ -39,9 +39,6 @@ pub struct ElToritoOpt {
     #[structopt(long = "no-boot", help = "Boot image is not bootable")]
     pub no_boot: bool,
 
-    #[structopt(
-        long = "boot-info-table",
-        help = "Patch boot image with info table"
-    )]
+    #[structopt(long = "boot-info-table", help = "Patch boot image with info table")]
     pub boot_info_table: bool,
 }

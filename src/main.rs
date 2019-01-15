@@ -7,7 +7,7 @@ use structopt::StructOpt;
 
 mod iso;
 
-use iso::option::Opt;
+use crate::iso::option::Opt;
 
 fn main() {
     let mut opt = Opt::from_args();
