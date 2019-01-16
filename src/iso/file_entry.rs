@@ -68,7 +68,6 @@ impl FileEntry {
         output_writter.write_u8(entry_size)?;
 
         // Extended Attribute Record length.
-        // TODO Rock Ridge
         output_writter.write_u8(0u8)?;
 
         // Location of extent (in LB)
@@ -108,6 +107,8 @@ impl FileEntry {
         if (file_identifier_len % 2) == 0 {
             output_writter.write_u8(0x0u8)?;
         }
+
+        // TODO Rock Ridge
 
         Ok(())
     }

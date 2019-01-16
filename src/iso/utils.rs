@@ -43,15 +43,24 @@ pub fn get_entry_size(
     let file_identifier = match directory_type {
         1 => &[0u8],
         2 => &[1u8],
+        3 => &[0u8],
+        4 => &[1u8],
         _ => &file_name_corrected[..],
     };
+
     let mut file_identifier_len = file_identifier.len();
+    let mut system_use_field_size = 0;
 
     if file_identifier_len % 2 != padding_type {
         file_identifier_len += 1;
     }
 
-    base_size + file_identifier_len as u32
+    // root '.' has CE and SP of SUSP
+    if directory_type == 3 {
+        system_use_field_size += 0x7 + 0x1c; // SUSP 'SP' + SUSP 'CE'
+    }
+
+    base_size + file_identifier_len as u32 + system_use_field_size
 }
 
 macro_rules! write_bothendian {

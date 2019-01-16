@@ -113,7 +113,7 @@ impl VolumeDescriptor {
                 output_writter.write_u32::<BigEndian>(path_table_lba_be)?;
                 output_writter.write_u32::<BigEndian>(0)?;
 
-                root_dir.write_as_current(output_writter)?;
+                root_dir.write_as_current(output_writter, false)?;
 
                 let volume_set_identifier: [u8; 128] = [0x20; 128];
                 let publisher_identifier: [u8; 128] = [0x20; 128];

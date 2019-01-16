@@ -9,6 +9,7 @@ use std::fs;
 use std::fs::DirEntry;
 use std::fs::Metadata;
 use std::io::prelude::*;
+use std::io::Cursor;
 use std::io::SeekFrom;
 use std::path::PathBuf;
 
@@ -19,6 +20,7 @@ pub struct DirectoryEntry {
     pub path: PathBuf,
     pub dir_childs: Vec<DirectoryEntry>,
     pub files_childs: Vec<FileEntry>,
+    pub continuation_area: Option<Vec<u8>>,
     pub lba: u32,
 }
 
@@ -35,7 +37,7 @@ impl DirectoryEntry {
         let expected_aligned_pos = utils::align_up(current_pos, LOGIC_SIZE_U32 as i32);
 
         let diff_size = expected_aligned_pos - current_pos;
-        let file_entry_size = directory_entry.get_entry_size() as i32;
+        let file_entry_size = directory_entry.get_entry_size(Some(directory_type)) as i32;
 
         if file_entry_size > diff_size && diff_size != 0 {
             let mut padding: Vec<u8> = Vec::new();
@@ -44,27 +46,21 @@ impl DirectoryEntry {
         }
 
         let file_name = directory_entry.path.file_name().unwrap().to_str().unwrap();
-        //.to_uppercase();
 
         let file_name_fixed = utils::convert_name(file_name);
         let file_identifier = match directory_type {
             1 => &[0u8],
             2 => &[1u8],
+            3 => &[0u8],
+            4 => &[1u8],
             _ => &file_name_fixed[..],
         };
 
         let file_identifier_len = file_identifier.len();
-        let file_identifier_padding = if (file_identifier_len % 2) == 0 { 1 } else { 0 };
 
-        let entry_size: u8 = match directory_type {
-            0 => 0x21u8 + (file_identifier_len as u8) + file_identifier_padding,
-            _ => 0x22u8,
-        };
-
-        output_writter.write_u8(entry_size)?;
+        output_writter.write_u8(file_entry_size as u8)?;
 
         // Extended Attribute Record length.
-        // TODO: Rock Ridge
         output_writter.write_u8(0u8)?;
 
         // Location of extent (in LB)
@@ -104,6 +100,47 @@ impl DirectoryEntry {
             output_writter.write_u8(0x0u8)?;
         }
 
+        // SUSP entries for root '.'
+        if directory_type == 3 {
+            // SUSP 'SP' entry (IEEE P1281 5.3)
+            output_writter.write_all(b"SP")?;
+            output_writter.write_u8(0x7)?;
+            output_writter.write_u8(0x1)?;
+            output_writter.write_u8(0xBE)?;
+            output_writter.write_u8(0xEF)?;
+            output_writter.write_u8(0x0)?;
+
+            // TODO: 'CE' can be found in other entries, move this when size calculation will be good
+            if directory_entry.continuation_area.is_some() {
+                // SUSP 'CE' entry (IEEE P1281 5.1)
+                output_writter.write_all(b"CE")?;
+                output_writter.write_u8(0x1c)?;
+                output_writter.write_u8(0x1)?;
+
+                // The 'CE' logical block is just after the root directory entries
+                write_bothendian! {
+                    output_writter.write_u32(directory_entry.lba + directory_entry.get_extent_size_in_lb())?;
+                }
+
+                // The 'CE' offset inside the block (0 for our usecase)
+                write_bothendian! {
+                    output_writter.write_u32(0)?;
+                }
+
+                // 'CE' section size
+                match &directory_entry.continuation_area {
+                    Some(continuation_area) => {
+                        write_bothendian! {
+                            output_writter.write_u32(continuation_area.len() as u32)?;
+                        }
+                    }
+                    _ => panic!(),
+                }
+            }
+        }
+
+        // TODO: Rock Ridge
+
         Ok(())
     }
 
@@ -125,10 +162,12 @@ impl DirectoryEntry {
 
     pub fn get_extent_size(&self) -> u32 {
         let mut res = 0u32;
-        res += 0x22 * 2; // '.' and '..'
+
+        res += self.get_entry_size(Some(3)); // '.'
+        res += self.get_entry_size(Some(4)); // '..'
 
         for entry in &self.dir_childs {
-            res += entry.get_entry_size();
+            res += entry.get_entry_size(None);
         }
 
         for entry in &self.files_childs {
@@ -138,10 +177,10 @@ impl DirectoryEntry {
         res
     }
 
-    pub fn get_entry_size(&self) -> u32 {
+    pub fn get_entry_size(&self, directory_type: Option<u32>) -> u32 {
         let file_name = self.path.file_name().unwrap().to_str().unwrap();
 
-        utils::get_entry_size(0x21, file_name, 0, 1)
+        utils::get_entry_size(0x21, file_name, directory_type.unwrap_or(0), 1)
     }
 
     pub fn get_extent_size_in_lb(&self) -> u32 {
@@ -254,7 +293,7 @@ impl DirectoryEntry {
         // Seek to the correct LBA
         output_writter.seek(SeekFrom::Start(u64::from(self.lba * LOGIC_SIZE_U32)))?;
 
-        self.write_as_current(output_writter)?;
+        self.write_as_current(output_writter, parent_option.is_none())?;
 
         let mut empty_parent_path = PathBuf::new();
         empty_parent_path.set_file_name("dummy");
@@ -265,6 +304,7 @@ impl DirectoryEntry {
             dir_childs: Vec::new(),
             files_childs: Vec::new(),
             lba: self.lba,
+            continuation_area: None,
         };
 
         let parent = match parent_option {
@@ -298,6 +338,8 @@ impl DirectoryEntry {
             output_writter.write_all(&padding)?;
         }
 
+        self.write_continuation_area(output_writter)?;
+
         // Restore old position
         output_writter.seek(SeekFrom::Start(old_pos))?;
 
@@ -318,11 +360,17 @@ impl DirectoryEntry {
         Ok(())
     }
 
-    pub fn write_as_current<T>(&self, output_writter: &mut T) -> std::io::Result<()>
+    pub fn write_as_current<T>(
+        &self,
+        output_writter: &mut T,
+        need_susp: bool,
+    ) -> std::io::Result<()>
     where
         T: Write + Seek,
     {
-        DirectoryEntry::write_entry(self, output_writter, 1)
+        let directory_type = if need_susp { 3 } else { 1 };
+
+        DirectoryEntry::write_entry(self, output_writter, directory_type)
     }
 
     pub fn write_as_parent<T>(&self, output_writter: &mut T) -> std::io::Result<()>
@@ -337,6 +385,41 @@ impl DirectoryEntry {
         T: Write + Seek,
     {
         DirectoryEntry::write_entry(self, output_writter, 0)
+    }
+
+    fn write_continuation_area<T>(&self, output_writter: &mut T) -> std::io::Result<()>
+    where
+        T: Write + Seek,
+    {
+        if let Some(data) = &self.continuation_area {
+            let old_pos = output_writter.seek(SeekFrom::Current(0))?;
+
+            // Seek to the correct LBA
+            output_writter.seek(SeekFrom::Start(u64::from(
+                (self.lba + self.get_extent_size_in_lb()) * LOGIC_SIZE_U32,
+            )))?;
+
+            let mut tmp_cursor = Cursor::new(data.clone());
+
+            std::io::copy(&mut tmp_cursor, output_writter)?;
+
+            // Pad to LBA size
+            let current_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
+            let expected_aligned_pos = ((current_pos as i64) & -LOGIC_SIZE_I64) as usize;
+
+            let diff_size = current_pos - expected_aligned_pos;
+
+            if diff_size != 0 {
+                let mut padding: Vec<u8> = Vec::new();
+                padding.resize(LOGIC_SIZE - diff_size, 0u8);
+                output_writter.write_all(&padding)?;
+            }
+
+            // Restore old position
+            output_writter.seek(SeekFrom::Start(old_pos))?;
+        }
+
+        Ok(())
     }
 
     pub fn get_directory(&mut self, dir_name: &str) -> Option<&mut DirectoryEntry> {
@@ -436,6 +519,7 @@ impl DirectoryEntry {
             dir_childs,
             files_childs,
             lba: 0,
+            continuation_area: None,
         })
     }
 }

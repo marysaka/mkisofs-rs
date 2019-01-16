@@ -25,6 +25,11 @@ fn assign_directory_identifiers(
     last_index: &mut u32,
     last_lba: &mut u32,
 ) {
+    // Reserve CE space for SUSP
+    if tree.continuation_area.is_some() {
+        *last_lba += 1;
+    }
+
     if *last_index == 0 {
         tree.parent_index = *last_index;
         tree.path_table_index = *last_index + 1;
@@ -234,6 +239,21 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
     let mut path_table_index = 0;
 
     let mut tmp_lba = current_lba;
+
+    // create 'ER' entry of Rock Ridge 1.2
+    let mut continuation_area: Vec<u8> = Vec::new();
+    continuation_area.write_all(b"ER")?;
+    continuation_area.write_u8(0xB6)?;
+    continuation_area.write_u8(0x1)?;
+    continuation_area.write_u8(0x9)?;
+    continuation_area.write_u8(0x48)?;
+    continuation_area.write_u8(0x5d)?;
+    continuation_area.write_u8(0x1)?;
+    continuation_area.write_all(b"IEEE_1282")?;
+    continuation_area
+        .write_all(b"THE IEEE 1282 PROTOCOL PROVIDES SUPPORT FOR POSIX FILE SYSTEM SEMANTICS.")?;
+    continuation_area.write_all(b"PLEASE CONTACT THE IEEE STANDARDS DEPARTMENT, PISCATAWAY, NJ, USA FOR THE 1282 SPECIFICATION.")?;
+    tree.continuation_area = Some(continuation_area);
 
     assign_directory_identifiers(&mut tree, &mut path_table_index, &mut tmp_lba);
     tree.parent_index = 1;
