@@ -191,7 +191,11 @@ fn patch_boot_image(tree: &mut DirectoryEntry, opt: &mut option::Opt) -> std::io
     Ok(())
 }
 
-fn write_system_area<T>(output_writter: &mut T, opt: &option::Opt) -> std::io::Result<()>
+fn write_system_area<T>(
+    output_writter: &mut T,
+    opt: &option::Opt,
+    lb_count: u32,
+) -> std::io::Result<()>
 where
     T: Write + Seek,
 {
@@ -218,6 +222,52 @@ where
         let mut padding: Vec<u8> = Vec::new();
         padding.resize(LOGIC_SIZE * 0x10 - diff_size, 0u8);
         output_writter.write_all(&padding)?;
+    }
+
+    if opt.protective_msdos_label {
+        let current_pos = output_writter.seek(SeekFrom::Current(0))?;
+
+        // First MBR partition
+        output_writter.seek(SeekFrom::Start(0x1BE))?;
+
+        // bootable
+        output_writter.write_u8(0x80)?;
+
+        let partition_offset = 1;
+        let partition_number = 1;
+        let head_count = 64;
+        let sector_count = 32;
+
+        let size_in_sector = (lb_count * LOGIC_SIZE_U32) / SECTOR_SIZE;
+
+        // CHS address start
+        utils::write_lba_to_cls(output_writter, partition_number, head_count, sector_count)?;
+
+        // Simple partition table
+        output_writter.write_u8(0xCD)?;
+
+        // CHS address end
+        utils::write_lba_to_cls(output_writter, size_in_sector - 1, head_count, sector_count)?;
+
+        // partition offset
+        output_writter.write_u32::<LittleEndian>(partition_offset)?;
+
+        // Image size
+        output_writter.write_u32::<LittleEndian>(size_in_sector - partition_offset)?;
+
+        // Clean other boot entries
+        let empty_data: [u8; 0x10] = [0x0; 0x10];
+
+        output_writter.write_all(&empty_data)?;
+        output_writter.write_all(&empty_data)?;
+        output_writter.write_all(&empty_data)?;
+
+        // write "valid bootsector"
+        output_writter.seek(SeekFrom::Start(0x1FE))?;
+        output_writter.write_u8(0x55)?;
+        output_writter.write_u8(0xAA)?;
+
+        output_writter.seek(SeekFrom::Start(current_pos))?;
     }
 
     Ok(())
@@ -258,7 +308,6 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
     assign_directory_identifiers(&mut tree, &mut path_table_index, &mut tmp_lba);
     tree.parent_index = 1;
     tree.lba = current_lba;
-    tree.print();
 
     current_lba = tmp_lba;
     current_lba += 1;
@@ -277,7 +326,7 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
         patch_boot_image(&mut tree, opt)?;
     }
 
-    write_system_area(&mut out_file, opt)?;
+    write_system_area(&mut out_file, opt, current_lba)?;
 
     for mut volume in volume_descriptor_list {
         volume.write_volume(&mut out_file, &mut tree, path_table_start_lba, current_lba)?;

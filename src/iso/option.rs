@@ -21,6 +21,12 @@ pub struct Opt {
     )]
     pub embedded_boot: Option<String>,
 
+    #[structopt(
+        long = "protective-msdos-label",
+        help = "Patch the System Area by a simple PC-DOS partition table where partition 1 claims the range of the ISO image but leaves the first block unclaimed."
+    )]
+    pub protective_msdos_label: bool,
+
     pub input_directory: String,
 }
 

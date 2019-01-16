@@ -210,7 +210,7 @@ impl DirectoryEntry {
     pub fn get_extent_size_in_lb(&self) -> u32 {
         let mut res = 1u32;
         let mut size = 0u32;
-    
+
         size += self.get_entry_size(Some(3)); // '.'
         size += self.get_entry_size(Some(2)); // '..'
 
@@ -354,9 +354,7 @@ impl DirectoryEntry {
         // Seek to the correct LBA
         output_writter.seek(SeekFrom::Start(u64::from(self.lba * LOGIC_SIZE_U32)))?;
 
-        let directory_type_current = if parent_option.is_none() {
-            3
-        } else { 1 };
+        let directory_type_current = if parent_option.is_none() { 3 } else { 1 };
 
         self.write_as_current(output_writter, directory_type_current)?;
 
