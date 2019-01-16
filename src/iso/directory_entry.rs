@@ -139,7 +139,38 @@ impl DirectoryEntry {
             }
         }
 
-        // TODO: Rock Ridge
+        // RRIP 'PX' entry (IEEE P1282 4.1.1)
+        output_writter.write_all(b"PX")?;
+        output_writter.write_u8(0x2c)?;
+        output_writter.write_u8(0x1)?;
+
+        // file mode
+        write_bothendian! {
+            output_writter.write_u32(0o040755)?; // harcoded drwxr-xr-x
+        }
+
+        // links
+        write_bothendian! {
+            output_writter.write_u32(0x1)?; // one link
+        }
+
+        // user id
+        write_bothendian! {
+            output_writter.write_u32(0x0)?; // root
+        }
+
+        // group id
+        write_bothendian! {
+            output_writter.write_u32(0x0)?; // root
+        }
+
+        // "File Serial number"
+        write_bothendian! {
+            // dirty way to generate an inode but I guess it's fine
+            output_writter.write_u32(directory_entry.lba + directory_entry.path_table_index)?;
+        }
+
+        // TODO: Rock Ridge 'NM'
 
         Ok(())
     }
@@ -149,7 +180,7 @@ impl DirectoryEntry {
 
         let file_name = self.path.file_name().unwrap().to_str().unwrap();
 
-        let directory_type = if self.path_table_index == 1 { 1 } else { 0 };
+        let directory_type = if self.path_table_index == 1 { 5 } else { 6 };
 
         res += utils::get_entry_size(0x8, file_name, directory_type, 0);
 

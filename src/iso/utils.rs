@@ -45,6 +45,7 @@ pub fn get_entry_size(
         2 => &[1u8],
         3 => &[0u8],
         4 => &[1u8],
+        5 => &[0u8],
         _ => &file_name_corrected[..],
     };
 
@@ -54,6 +55,13 @@ pub fn get_entry_size(
     if file_identifier_len % 2 != padding_type {
         file_identifier_len += 1;
     }
+
+    // is not a path entry calculation
+    if directory_type < 5 {
+        // Rock Ridge 'PX' entry
+        system_use_field_size += 0x2c;
+    }
+
 
     // root '.' has CE and SP of SUSP
     if directory_type == 3 {

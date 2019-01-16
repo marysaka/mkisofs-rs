@@ -61,11 +61,7 @@ impl FileEntry {
         let file_identifier = utils::convert_name(&file_name);
         let file_identifier_len = file_identifier.len() + 2;
 
-        let file_identifier_padding = if (file_identifier_len % 2) == 0 { 1 } else { 0 };
-
-        let entry_size: u8 = 0x21u8 + (file_identifier_len as u8) + file_identifier_padding;
-
-        output_writter.write_u8(entry_size)?;
+        output_writter.write_u8(file_entry_size as u8)?;
 
         // Extended Attribute Record length.
         output_writter.write_u8(0u8)?;
@@ -108,7 +104,38 @@ impl FileEntry {
             output_writter.write_u8(0x0u8)?;
         }
 
-        // TODO Rock Ridge
+        // RRIP 'PX' entry (IEEE P1282 4.1.1)
+        output_writter.write_all(b"PX")?;
+        output_writter.write_u8(0x2c)?;
+        output_writter.write_u8(0x1)?;
+
+        // file mode
+        write_bothendian! {
+            output_writter.write_u32(0o100444)?; // harcoded r--r--r--
+        }
+
+        // links
+        write_bothendian! {
+            output_writter.write_u32(0x1)?; // one link
+        }
+
+        // user id
+        write_bothendian! {
+            output_writter.write_u32(0x0)?; // root
+        }
+
+        // group id
+        write_bothendian! {
+            output_writter.write_u32(0x0)?; // root
+        }
+
+        // "File Serial number"
+        write_bothendian! {
+            // dirty way to generate an inode but I guess it's fine
+            output_writter.write_u32(self.lba)?;
+        }
+
+        // TODO Rock Ridge 'NM'
 
         Ok(())
     }
@@ -116,7 +143,8 @@ impl FileEntry {
     pub fn get_entry_size(&self) -> u32 {
         let file_name = self.get_file_name();
 
-        utils::get_entry_size(0x21, &file_name, 0, 1)
+        // don't miss to count the ";1"!
+        utils::get_entry_size(0x21 + 2, &file_name, 0, 1)
     }
 
     pub fn update(&mut self) {
