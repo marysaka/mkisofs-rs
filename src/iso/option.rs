@@ -5,7 +5,7 @@ use structopt::StructOpt;
 #[derive(StructOpt, Debug)]
 #[structopt(
     name = "mkisofs-rs",
-    about = "create an hybrid ISO-9660 filesystem-image with optional Rock Ridge attributes (Rock Ridge still TODO)."
+    about = "create an hybrid ISO-9660 filesystem-image with Rock Ridge attributes."
 )]
 pub struct Opt {
     #[structopt(long, short = "o", help = "Set output file name")]

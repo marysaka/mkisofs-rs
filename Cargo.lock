@@ -64,7 +64,7 @@ version = "0.2.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
-name = "mkbootableiso"
+name = "mkisofs-rs"
 version = "0.1.0"
 dependencies = [
  "byteorder 1.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
