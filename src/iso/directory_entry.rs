@@ -150,7 +150,7 @@ impl DirectoryEntry {
 
             // file mode
             write_bothendian! {
-                output_writter.write_u32(0o040755)?; // harcoded drwxr-xr-x
+                output_writter.write_u32(0o040_755)?; // harcoded drwxr-xr-x
             }
 
             // links
@@ -540,21 +540,6 @@ impl DirectoryEntry {
         self.files_childs.last().unwrap()
     }
 
-    pub fn print(&self) {
-        println!(
-            "{:?}: {} {} ({:x}, size: {:x})",
-            self.path,
-            self.parent_index,
-            self.path_table_index,
-            self.lba,
-            self.get_extent_size_in_lb()
-        );
-
-        for entry in &self.dir_childs {
-            entry.print();
-        }
-    }
-
     fn add_and_merge_childs_directories(
         dir_childs: &mut Vec<DirectoryEntry>,
         other: DirectoryEntry,
@@ -591,12 +576,11 @@ impl DirectoryEntry {
         }
     }
 
-    pub fn new(path: &Vec<PathBuf>) -> std::io::Result<DirectoryEntry> {
-        let dir_path = path.clone();
+    pub fn new(path: &[PathBuf]) -> std::io::Result<DirectoryEntry> {
         let mut dir_childs: Vec<DirectoryEntry> = Vec::new();
         let mut files_childs: Vec<FileEntry> = Vec::new();
 
-        let mut ordered_dir: Vec<DirEntry> = dir_path
+        let mut ordered_dir: Vec<DirEntry> = path
             .iter()
             .map(|path| {
                 let res: Vec<DirEntry> = fs::read_dir(path).unwrap().map(|r| r.unwrap()).collect();

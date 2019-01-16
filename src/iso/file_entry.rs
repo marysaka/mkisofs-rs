@@ -114,7 +114,7 @@ impl FileEntry {
 
         // file mode
         write_bothendian! {
-            output_writter.write_u32(0o100644)?; // harcoded rw-r--r--
+            output_writter.write_u32(0o100_644)?; // harcoded rw-r--r--
         }
 
         // links
