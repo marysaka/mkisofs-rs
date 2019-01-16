@@ -45,6 +45,8 @@ impl DirectoryEntry {
             output_writter.write_all(&padding)?;
         }
 
+        let old_pos = output_writter.seek(SeekFrom::Current(0))? as i32;
+
         let file_name = directory_entry.path.file_name().unwrap().to_str().unwrap();
 
         let file_name_fixed = utils::convert_name(file_name);
@@ -53,6 +55,7 @@ impl DirectoryEntry {
             2 => &[1u8],
             3 => &[0u8],
             4 => &[1u8],
+            5 => &[0u8],
             _ => &file_name_fixed[..],
         };
 
@@ -139,38 +142,51 @@ impl DirectoryEntry {
             }
         }
 
-        // RRIP 'PX' entry (IEEE P1282 4.1.1)
-        output_writter.write_all(b"PX")?;
-        output_writter.write_u8(0x2c)?;
-        output_writter.write_u8(0x1)?;
+        if directory_type < 5 {
+            // RRIP 'PX' entry (IEEE P1282 4.1.1)
+            output_writter.write_all(b"PX")?;
+            output_writter.write_u8(0x2c)?;
+            output_writter.write_u8(0x1)?;
 
-        // file mode
-        write_bothendian! {
-            output_writter.write_u32(0o040755)?; // harcoded drwxr-xr-x
+            // file mode
+            write_bothendian! {
+                output_writter.write_u32(0o040755)?; // harcoded drwxr-xr-x
+            }
+
+            // links
+            write_bothendian! {
+                output_writter.write_u32(0x1)?; // one link
+            }
+
+            // user id
+            write_bothendian! {
+                output_writter.write_u32(0x0)?; // root
+            }
+
+            // group id
+            write_bothendian! {
+                output_writter.write_u32(0x0)?; // root
+            }
+
+            // "File Serial number"
+            write_bothendian! {
+                // dirty way to generate an inode but I guess it's fine
+                output_writter.write_u32(directory_entry.lba + directory_entry.path_table_index)?;
+            }
         }
 
-        // links
-        write_bothendian! {
-            output_writter.write_u32(0x1)?; // one link
+        // RRIP 'NM' entry (IEEE P1282 4.1.4)
+        if directory_type == 0 {
+            output_writter.write_all(b"NM")?;
+            output_writter.write_u8(0x5 + file_name.len() as u8)?;
+            output_writter.write_u8(0x1)?;
+            output_writter.write_u8(0x0)?; // No flags
+            output_writter.write_all(file_name.as_bytes())?;
         }
 
-        // user id
-        write_bothendian! {
-            output_writter.write_u32(0x0)?; // root
-        }
+        let new_pos = output_writter.seek(SeekFrom::Current(0))? as i32;
 
-        // group id
-        write_bothendian! {
-            output_writter.write_u32(0x0)?; // root
-        }
-
-        // "File Serial number"
-        write_bothendian! {
-            // dirty way to generate an inode but I guess it's fine
-            output_writter.write_u32(directory_entry.lba + directory_entry.path_table_index)?;
-        }
-
-        // TODO: Rock Ridge 'NM'
+        assert!(old_pos + file_entry_size == new_pos);
 
         Ok(())
     }
@@ -191,18 +207,37 @@ impl DirectoryEntry {
         res
     }
 
-    pub fn get_extent_size(&self) -> u32 {
-        let mut res = 0u32;
-
-        res += self.get_entry_size(Some(3)); // '.'
-        res += self.get_entry_size(Some(4)); // '..'
+    pub fn get_extent_size_in_lb(&self) -> u32 {
+        let mut res = 1u32;
+        let mut size = 0u32;
+    
+        size += self.get_entry_size(Some(3)); // '.'
+        size += self.get_entry_size(Some(2)); // '..'
 
         for entry in &self.dir_childs {
-            res += entry.get_entry_size(None);
+            let entry_size = entry.get_entry_size(Some(0)) as i32;
+            let expected_aligned_size = utils::align_up(size as i32, LOGIC_SIZE_U32 as i32);
+            let available_size_in_lb = expected_aligned_size - size as i32;
+
+            if entry_size > available_size_in_lb && available_size_in_lb != 0 {
+                size = 0;
+                res += 1;
+            }
+
+            size += entry_size as u32;
         }
 
         for entry in &self.files_childs {
-            res += entry.get_entry_size();
+            let entry_size = entry.get_entry_size() as i32;
+            let expected_aligned_size = utils::align_up(size as i32, LOGIC_SIZE_U32 as i32);
+            let available_size_in_lb = expected_aligned_size - size as i32;
+
+            if entry_size > available_size_in_lb && available_size_in_lb != 0 {
+                size = 0;
+                res += 1;
+            }
+
+            size += entry_size as u32;
         }
 
         res
@@ -212,11 +247,6 @@ impl DirectoryEntry {
         let file_name = self.path.file_name().unwrap().to_str().unwrap();
 
         utils::get_entry_size(0x21, file_name, directory_type.unwrap_or(0), 1)
-    }
-
-    pub fn get_extent_size_in_lb(&self) -> u32 {
-        (utils::align_up(self.get_extent_size() as i32, LOGIC_SIZE_U32 as i32) as u32)
-            / LOGIC_SIZE_U32
     }
 
     fn write_path_table_entry<T, Order: ByteOrder>(
@@ -324,7 +354,11 @@ impl DirectoryEntry {
         // Seek to the correct LBA
         output_writter.seek(SeekFrom::Start(u64::from(self.lba * LOGIC_SIZE_U32)))?;
 
-        self.write_as_current(output_writter, parent_option.is_none())?;
+        let directory_type_current = if parent_option.is_none() {
+            3
+        } else { 1 };
+
+        self.write_as_current(output_writter, directory_type_current)?;
 
         let mut empty_parent_path = PathBuf::new();
         empty_parent_path.set_file_name("dummy");
@@ -394,13 +428,11 @@ impl DirectoryEntry {
     pub fn write_as_current<T>(
         &self,
         output_writter: &mut T,
-        need_susp: bool,
+        directory_type: u32,
     ) -> std::io::Result<()>
     where
         T: Write + Seek,
     {
-        let directory_type = if need_susp { 3 } else { 1 };
-
         DirectoryEntry::write_entry(self, output_writter, directory_type)
     }
 

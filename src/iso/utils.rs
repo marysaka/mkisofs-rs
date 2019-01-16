@@ -39,12 +39,16 @@ pub fn get_entry_size(
     directory_type: u32,
     padding_type: usize,
 ) -> u32 {
+    let file_name_len = file_name.len();
+    if file_name_len > 251 {
+        panic!("File name \"{}\" is too big (max size is 251 bytes)", file_name);
+    }
+
     let file_name_corrected = convert_name(file_name);
     let file_identifier = match directory_type {
         1 => &[0u8],
         2 => &[1u8],
         3 => &[0u8],
-        4 => &[1u8],
         5 => &[0u8],
         _ => &file_name_corrected[..],
     };
@@ -60,6 +64,13 @@ pub fn get_entry_size(
     if directory_type < 5 {
         // Rock Ridge 'PX' entry
         system_use_field_size += 0x2c;
+    }
+
+    // regular directory/file
+    if directory_type == 0 {
+        // Rock Ridge 'NM' entry
+        system_use_field_size += 0x5;
+        system_use_field_size += file_name_len as u32;
     }
 
 

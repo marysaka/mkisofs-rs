@@ -45,6 +45,7 @@ impl FileEntry {
     where
         T: Write + Seek,
     {
+        //println!("{:?}", self);
         let current_pos = output_writter.seek(SeekFrom::Current(0))? as i32;
         let expected_aligned_pos = utils::align_up(current_pos, LOGIC_SIZE_U32 as i32);
 
@@ -56,6 +57,8 @@ impl FileEntry {
             padding.resize(diff_size as usize, 0u8);
             output_writter.write_all(&padding)?;
         }
+
+        let old_pos = output_writter.seek(SeekFrom::Current(0))? as i32;
 
         let file_name = self.get_file_name();
         let file_identifier = utils::convert_name(&file_name);
@@ -111,7 +114,7 @@ impl FileEntry {
 
         // file mode
         write_bothendian! {
-            output_writter.write_u32(0o100444)?; // harcoded r--r--r--
+            output_writter.write_u32(0o100644)?; // harcoded rw-r--r--
         }
 
         // links
@@ -135,7 +138,16 @@ impl FileEntry {
             output_writter.write_u32(self.lba)?;
         }
 
-        // TODO Rock Ridge 'NM'
+        // RRIP 'NM' entry (IEEE P1282 4.1.4)
+        output_writter.write_all(b"NM")?;
+        output_writter.write_u8(0x5 + file_name.len() as u8)?;
+        output_writter.write_u8(0x1)?;
+        output_writter.write_u8(0x0)?; // No flags
+        output_writter.write_all(file_name.as_bytes())?;
+
+        let new_pos = output_writter.seek(SeekFrom::Current(0))? as i32;
+
+        assert!(old_pos + file_entry_size == new_pos);
 
         Ok(())
     }
