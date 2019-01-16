@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 /// A basic example
@@ -27,7 +28,8 @@ pub struct Opt {
     )]
     pub protective_msdos_label: bool,
 
-    pub input_directory: String,
+    #[structopt(parse(from_os_str))]
+    pub input_files: Vec<PathBuf>,
 }
 
 #[derive(StructOpt, Debug)]

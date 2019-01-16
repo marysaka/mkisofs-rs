@@ -1,4 +1,4 @@
-use byteorder::{WriteBytesExt};
+use byteorder::WriteBytesExt;
 use std::io::Write;
 
 pub const LOGIC_SIZE: usize = 0x800;

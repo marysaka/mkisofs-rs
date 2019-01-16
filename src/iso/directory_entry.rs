@@ -249,6 +249,10 @@ impl DirectoryEntry {
         utils::get_entry_size(0x21, file_name, directory_type.unwrap_or(0), 1)
     }
 
+    pub fn get_file_name(&self) -> String {
+        self.path.file_name().unwrap().to_str().unwrap().to_string()
+    }
+
     fn write_path_table_entry<T, Order: ByteOrder>(
         directory_entry: &DirectoryEntry,
         output_writter: &mut T,
@@ -551,18 +555,68 @@ impl DirectoryEntry {
         }
     }
 
-    pub fn new(path: PathBuf) -> std::io::Result<DirectoryEntry> {
+    fn add_and_merge_childs_directories(
+        dir_childs: &mut Vec<DirectoryEntry>,
+        other: DirectoryEntry,
+    ) {
+        let mut new_entry = other;
+        let optinal_present_entry: Option<&mut DirectoryEntry> = dir_childs
+            .iter_mut()
+            .filter(|in_entry| in_entry.get_file_name() == new_entry.get_file_name())
+            .last();
+
+        if let Some(present_entry) = optinal_present_entry {
+            present_entry
+                .files_childs
+                .append(&mut new_entry.files_childs);
+            present_entry.merge_child_directories(new_entry);
+        } else {
+            dir_childs.push(new_entry);
+        }
+    }
+
+    fn merge_child_directories(&mut self, other: DirectoryEntry) {
+        for mut child in other.dir_childs {
+            let vec = &mut self.dir_childs;
+            let optinal_present_entry: Option<&mut DirectoryEntry> = vec
+                .iter_mut()
+                .filter(|in_entry| in_entry.get_file_name() == child.get_file_name())
+                .last();
+            if let Some(present_entry) = optinal_present_entry {
+                present_entry.files_childs.append(&mut child.files_childs);
+                present_entry.merge_child_directories(child);
+            } else {
+                self.dir_childs.push(child);
+            }
+        }
+    }
+
+    pub fn new(path: &Vec<PathBuf>) -> std::io::Result<DirectoryEntry> {
         let dir_path = path.clone();
         let mut dir_childs: Vec<DirectoryEntry> = Vec::new();
         let mut files_childs: Vec<FileEntry> = Vec::new();
 
-        let mut ordered_dir: Vec<DirEntry> = fs::read_dir(path)?.map(|r| r.unwrap()).collect();
+        let mut ordered_dir: Vec<DirEntry> = dir_path
+            .iter()
+            .map(|path| {
+                let res: Vec<DirEntry> = fs::read_dir(path).unwrap().map(|r| r.unwrap()).collect();
+                res
+            })
+            .flatten()
+            .collect();
+
         ordered_dir.sort_by_key(|dir| dir.path());
 
         for entry in ordered_dir {
             let entry_meta: Metadata = entry.metadata()?;
             if entry_meta.is_dir() {
-                dir_childs.push(DirectoryEntry::new(entry.path())?);
+                let mut path_list: Vec<PathBuf> = Vec::new();
+                path_list.push(entry.path());
+
+                DirectoryEntry::add_and_merge_childs_directories(
+                    &mut dir_childs,
+                    DirectoryEntry::new(&path_list)?,
+                );
             } else if entry_meta.is_file() {
                 files_childs.push(FileEntry {
                     file_type: FileType::Regular { path: entry.path() },
@@ -576,7 +630,7 @@ impl DirectoryEntry {
         Ok(DirectoryEntry {
             path_table_index: 0,
             parent_index: 0,
-            path: dir_path,
+            path: path[0].clone(),
             dir_childs,
             files_childs,
             lba: 0,

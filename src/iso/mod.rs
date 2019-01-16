@@ -285,7 +285,7 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
     // Reserve 4 LBA for path tables (add some spacing after table)
     current_lba += 4;
 
-    let mut tree = DirectoryEntry::new(PathBuf::from(&opt.input_directory))?;
+    let mut tree = DirectoryEntry::new(&opt.input_files)?;
     let mut path_table_index = 0;
 
     let mut tmp_lba = current_lba;
