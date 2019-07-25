@@ -84,12 +84,7 @@ fn create_boot_catalog(tree: &mut DirectoryEntry) {
 fn fill_boot_catalog(tree: &mut DirectoryEntry, opt: &mut option::Opt) -> std::io::Result<()> {
     let value = opt.eltorito_opt.eltorito_boot.clone().unwrap();
     let eltorito_boot_file: &mut FileEntry = tree.get_file(&value).unwrap();
-    let mut sector_count = ((eltorito_boot_file.size as u32) + SECTOR_SIZE) / SECTOR_SIZE;
-
-    // align to LB if not enough
-    if sector_count < 4 {
-        sector_count = 4;
-    }
+    let sector_count = (opt.boot_load_size * SECTOR_SIZE) / LOGIC_SIZE_U32;
 
     let eltorito_lba = eltorito_boot_file.lba;
 
@@ -166,21 +161,29 @@ fn patch_boot_image(tree: &mut DirectoryEntry, opt: &mut option::Opt) -> std::io
     let mut buff: Cursor<Vec<u8>> = Cursor::new(Vec::new());
     std::io::copy(&mut content, &mut buff)?;
 
-    // Path the content now
-    buff.seek(SeekFrom::Start(0x8))?;
+    if opt.eltorito_opt.boot_info_table {
+        // Patch the content now
+        buff.seek(SeekFrom::Start(0x8))?;
 
-    // LBA of primary volume descriptor (always 0x10 in our case)
-    buff.write_u32::<LittleEndian>(0x10)?;
+        // LBA of primary volume descriptor (always 0x10 in our case)
+        buff.write_u32::<LittleEndian>(0x10)?;
 
-    // LBA of boot file.
-    buff.write_u32::<LittleEndian>(file.lba)?;
+        // LBA of boot file.
+        buff.write_u32::<LittleEndian>(file.lba)?;
 
-    // Length of boot file.
-    buff.write_u32::<LittleEndian>(file.size as u32)?;
+        // Length of boot file.
+        buff.write_u32::<LittleEndian>(file.size as u32)?;
 
-    // Checksum (actually ignored by GRUB2)
-    // FIXME: should we implement it?
-    buff.write_u32::<LittleEndian>(0x0)?;
+        // Checksum (actually ignored by GRUB2)
+        // FIXME: should we implement it?
+        buff.write_u32::<LittleEndian>(0x0)?;
+    }
+
+    if opt.eltorito_opt.grub2_boot_info {
+        // Patch the content now
+        buff.seek(SeekFrom::Start(0x9f4))?;
+        buff.write_u64::<LittleEndian>(u64::from(file.lba * 4 + 5))?;
+    }
 
     file.file_type = FileType::Buffer {
         name: file.get_file_name(),
@@ -192,6 +195,7 @@ fn patch_boot_image(tree: &mut DirectoryEntry, opt: &mut option::Opt) -> std::io
 }
 
 fn write_system_area<T>(
+    tree: &mut DirectoryEntry,
     output_writter: &mut T,
     opt: &option::Opt,
     lb_count: u32,
@@ -199,10 +203,23 @@ fn write_system_area<T>(
 where
     T: Write + Seek,
 {
-    let old_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
+    let old_pos = output_writter.seek(SeekFrom::Current(0))?;
+
+    let mut embedded_boot = None;
+    let need_grub2_mbr_patches;
 
     if opt.embedded_boot.is_some() {
-        let embedded_boot = opt.embedded_boot.clone().unwrap();
+        embedded_boot = opt.embedded_boot.clone();
+        need_grub2_mbr_patches = false;
+    } else if opt.grub2_mbr.is_some() {
+        embedded_boot = opt.grub2_mbr.clone();
+        need_grub2_mbr_patches = true;
+    } else {
+        need_grub2_mbr_patches = false;
+    }
+
+    if embedded_boot.is_some() {
+        let embedded_boot = embedded_boot.unwrap();
         let path: PathBuf = PathBuf::from_str(&embedded_boot).unwrap();
         if path.metadata().unwrap().len() > (LOGIC_SIZE * 0x10) as u64 {
             return Err(std::io::Error::new(
@@ -214,9 +231,19 @@ where
         std::io::copy(&mut embedded_boot_file, output_writter)?;
     }
 
+    let current_pos = output_writter.seek(SeekFrom::Current(0))?;
+
+    if need_grub2_mbr_patches && opt.eltorito_opt.eltorito_boot.is_some() {
+        output_writter.seek(SeekFrom::Start(old_pos + 0x1B0))?;
+        let value = opt.eltorito_opt.eltorito_boot.clone().unwrap();
+        let file: &mut FileEntry = tree.get_file(&value).unwrap();
+        output_writter.write_u64::<LittleEndian>(u64::from(file.lba * 4 + 4))?;
+        // Go back to where we are supposed to be...
+        output_writter.seek(SeekFrom::Start(current_pos))?;
+    }
+
     // Pad to 0x8000 if needed
-    let current_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
-    let diff_size = current_pos - old_pos;
+    let diff_size = current_pos as usize - old_pos as usize;
 
     if diff_size != LOGIC_SIZE * 0x10 {
         let mut padding: Vec<u8> = Vec::new();
@@ -243,8 +270,8 @@ where
         // CHS address start
         utils::write_lba_to_cls(output_writter, partition_number, head_count, sector_count)?;
 
-        // Simple partition table
-        output_writter.write_u8(0xCD)?;
+        // Simple partition table as we want to tell that we are a cd
+        output_writter.write_u8(0x17)?;
 
         // CHS address end
         utils::write_lba_to_cls(output_writter, size_in_sector - 1, head_count, sector_count)?;
@@ -322,11 +349,11 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
         fill_boot_catalog(&mut tree, opt)?;
     }
 
-    if opt.eltorito_opt.boot_info_table {
+    if opt.eltorito_opt.boot_info_table || opt.eltorito_opt.grub2_boot_info {
         patch_boot_image(&mut tree, opt)?;
     }
 
-    write_system_area(&mut out_file, opt, current_lba)?;
+    write_system_area(&mut tree, &mut out_file, opt, current_lba)?;
 
     for mut volume in volume_descriptor_list {
         volume.write_volume(&mut out_file, &mut tree, path_table_start_lba, current_lba)?;

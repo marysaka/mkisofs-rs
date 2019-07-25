@@ -23,6 +23,19 @@ pub struct Opt {
     pub embedded_boot: Option<String>,
 
     #[structopt(
+        long = "grub2-mbr",
+        help = "Patch and embedded_boot to simplify hybrid images"
+    )]
+    pub grub2_mbr: Option<String>,
+
+    #[structopt(
+        long = "boot-load-size",
+        help = "Set the number of 512-byte blocks to be loaded at boot time from the boot image in the current catalog entry.",
+        default_value = "4"
+    )]
+    pub boot_load_size: u32,
+
+    #[structopt(
         long = "protective-msdos-label",
         help = "Patch the System Area by a simple PC-DOS partition table where partition 1 claims the range of the ISO image but leaves the first block unclaimed."
     )]
@@ -49,4 +62,7 @@ pub struct ElToritoOpt {
 
     #[structopt(long = "boot-info-table", help = "Patch boot image with info table")]
     pub boot_info_table: bool,
+
+    #[structopt(long = "grub2-boot-info", help = "Patch for GRUB 2 El Torino image")]
+    pub grub2_boot_info: bool,
 }
