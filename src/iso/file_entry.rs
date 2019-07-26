@@ -45,7 +45,6 @@ impl FileEntry {
     where
         T: Write + Seek,
     {
-        //println!("{:?}", self);
         let current_pos = output_writter.seek(SeekFrom::Current(0))? as i32;
         let expected_aligned_pos = utils::align_up(current_pos, LOGIC_SIZE_U32 as i32);
 

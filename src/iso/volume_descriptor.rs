@@ -57,7 +57,7 @@ impl VolumeDescriptor {
                 // TODO: write it correctly
                 output_writter.write_all(b"EL TORITO SPECIFICATION")?;
 
-                let catalog_file: &FileEntry = root_dir.get_file("boot.cat").unwrap();
+                let catalog_file: &FileEntry = root_dir.get_file("boot.catalog").unwrap();
 
                 let empty_data: [u8; 0x29] = [0; 0x29];
                 output_writter.write_all(&empty_data)?;

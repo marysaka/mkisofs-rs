@@ -576,7 +576,7 @@ impl DirectoryEntry {
         }
     }
 
-    pub fn new(path: &[PathBuf]) -> std::io::Result<DirectoryEntry> {
+    pub fn set_path(&mut self, path: &[PathBuf]) -> std::io::Result<()> {
         let mut dir_childs: Vec<DirectoryEntry> = Vec::new();
         let mut files_childs: Vec<FileEntry> = Vec::new();
 
@@ -597,9 +597,11 @@ impl DirectoryEntry {
                 let mut path_list: Vec<PathBuf> = Vec::new();
                 path_list.push(entry.path());
 
+                let mut new_dir = DirectoryEntry::new()?;
+                new_dir.set_path(&path_list)?;
                 DirectoryEntry::add_and_merge_childs_directories(
                     &mut dir_childs,
-                    DirectoryEntry::new(&path_list)?,
+                    new_dir
                 );
             } else if entry_meta.is_file() {
                 files_childs.push(FileEntry {
@@ -611,12 +613,21 @@ impl DirectoryEntry {
                 })
             }
         }
+
+        self.path = path[0].clone();
+        self.dir_childs.append(&mut dir_childs);
+        self.files_childs.append(&mut files_childs);
+        Ok(())
+    }
+
+    pub fn new() -> std::io::Result<DirectoryEntry> {
+
         Ok(DirectoryEntry {
             path_table_index: 0,
             parent_index: 0,
-            path: path[0].clone(),
-            dir_childs,
-            files_childs,
+            path: PathBuf::new(),
+            dir_childs: Vec::new(),
+            files_childs: Vec::new(),
             lba: 0,
             continuation_area: None,
         })

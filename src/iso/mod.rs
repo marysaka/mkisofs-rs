@@ -77,7 +77,7 @@ fn generate_volume_descriptors(opt: &option::Opt) -> Vec<VolumeDescriptor> {
 }
 
 fn create_boot_catalog(tree: &mut DirectoryEntry) {
-    let catalog_file = FileEntry::new_buffered(String::from("boot.cat"));
+    let catalog_file = FileEntry::new_buffered(String::from("boot.catalog"));
     tree.add_file(catalog_file);
 }
 
@@ -88,7 +88,7 @@ fn fill_boot_catalog(tree: &mut DirectoryEntry, opt: &mut option::Opt) -> std::i
 
     let eltorito_lba = eltorito_boot_file.lba;
 
-    let file: &mut FileEntry = tree.get_file("boot.cat").unwrap();
+    let file: &mut FileEntry = tree.get_file("boot.catalog").unwrap();
 
     let mut buff: Vec<u8> = Vec::new();
 
@@ -312,7 +312,13 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
     // Reserve 4 LBA for path tables (add some spacing after table)
     current_lba += 4;
 
-    let mut tree = DirectoryEntry::new(&opt.input_files)?;
+    let mut tree = DirectoryEntry::new()?;
+
+    if opt.eltorito_opt.eltorito_boot.is_some() {
+        create_boot_catalog(&mut tree);
+    }
+
+    tree.set_path(&opt.input_files)?;
     let mut path_table_index = 0;
 
     let mut tmp_lba = current_lba;
@@ -338,10 +344,6 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
 
     current_lba = tmp_lba;
     current_lba += 1;
-
-    if opt.eltorito_opt.eltorito_boot.is_some() {
-        create_boot_catalog(&mut tree);
-    }
 
     reserve_file_space(&mut tree, &mut current_lba);
 
