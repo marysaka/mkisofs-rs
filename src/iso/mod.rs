@@ -53,14 +53,14 @@ fn assign_directory_identifiers(
 }
 
 fn reserve_file_space(directory_entry: &mut DirectoryEntry, current_lba: &mut u32) {
-    for child_directory in &mut directory_entry.dir_childs {
-        reserve_file_space(child_directory, current_lba);
-    }
-
     for child_file in &mut directory_entry.files_childs {
         let lba_count = ((child_file.size as u32) + LOGIC_SIZE_U32) / LOGIC_SIZE_U32;
         child_file.lba = *current_lba;
         *current_lba += lba_count;
+    }
+
+    for child_directory in &mut directory_entry.dir_childs {
+        reserve_file_space(child_directory, current_lba);
     }
 }
 
