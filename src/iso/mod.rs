@@ -218,8 +218,7 @@ where
         need_grub2_mbr_patches = false;
     }
 
-    if embedded_boot.is_some() {
-        let embedded_boot = embedded_boot.unwrap();
+    if let Some(embedded_boot) = embedded_boot {
         let path: PathBuf = PathBuf::from_str(&embedded_boot).unwrap();
         if path.metadata().unwrap().len() > (LOGIC_SIZE * 0x10) as u64 {
             return Err(std::io::Error::new(
@@ -233,13 +232,14 @@ where
 
     let current_pos = output_writter.seek(SeekFrom::Current(0))?;
 
-    if need_grub2_mbr_patches && opt.eltorito_opt.eltorito_boot.is_some() {
-        output_writter.seek(SeekFrom::Start(old_pos + 0x1B0))?;
-        let value = opt.eltorito_opt.eltorito_boot.clone().unwrap();
-        let file: &mut FileEntry = tree.get_file(&value).unwrap();
-        output_writter.write_u64::<LittleEndian>(u64::from(file.lba * 4 + 4))?;
-        // Go back to where we are supposed to be...
-        output_writter.seek(SeekFrom::Start(current_pos))?;
+    if need_grub2_mbr_patches {
+        if let Some(boot) = &opt.eltorito_opt.eltorito_boot {
+            output_writter.seek(SeekFrom::Start(old_pos + 0x1B0))?;
+            let file: &mut FileEntry = tree.get_file(&boot).unwrap();
+            output_writter.write_u64::<LittleEndian>(u64::from(file.lba * 4 + 4))?;
+            // Go back to where we are supposed to be...
+            output_writter.seek(SeekFrom::Start(current_pos))?;
+        }
     }
 
     // Pad to 0x8000 if needed
