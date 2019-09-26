@@ -157,7 +157,7 @@ fn patch_boot_image(tree: &mut DirectoryEntry, opt: &mut option::Opt) -> std::io
     let file: &mut FileEntry = tree.get_file(&value).unwrap();
 
     // We need to copy the file to a buffer and change the file type internally to be able to patch it
-    let mut content: Box<Read> = file.open_content_provider();
+    let mut content: Box<dyn Read> = file.open_content_provider();
     let mut buff: Cursor<Vec<u8>> = Cursor::new(Vec::new());
     std::io::copy(&mut content, &mut buff)?;
 

@@ -96,7 +96,7 @@ pub fn write_lba_to_cls<T>(
 where
     T: Write,
 {
-    let mut sector_number = (disk_lba % sector_count) + 1;;
+    let mut sector_number = (disk_lba % sector_count) + 1;
     let tmp = disk_lba / sector_count;
     let mut head_number = tmp % head_count;
     let mut cylinder_number = tmp / head_count;

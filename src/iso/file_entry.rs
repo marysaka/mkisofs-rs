@@ -34,7 +34,7 @@ impl FileEntry {
         }
     }
 
-    pub fn open_content_provider(&self) -> Box<Read> {
+    pub fn open_content_provider(&self) -> Box<dyn Read> {
         match &self.file_type {
             FileType::Regular { path } => Box::new(File::open(path).unwrap()),
             FileType::Buffer { data, .. } => Box::new(Cursor::new(data.clone())),
@@ -178,7 +178,7 @@ impl FileEntry {
         // Seek to the correct LBA
         output_writter.seek(SeekFrom::Start(u64::from(self.lba * LOGIC_SIZE_U32)))?;
 
-        let mut file: Box<Read> = self.open_content_provider();
+        let mut file: Box<dyn Read> = self.open_content_provider();
         io::copy(&mut file, output_writter)?;
 
         let current_pos = output_writter.seek(SeekFrom::Current(0))? as usize;
