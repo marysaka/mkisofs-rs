@@ -24,6 +24,7 @@ pub struct FileEntry {
     pub size: usize,
     pub lba: u32,
     pub aligned_size: usize,
+    pub truncate_names: bool,
 }
 
 impl FileEntry {
@@ -60,7 +61,7 @@ impl FileEntry {
         let old_pos = output_writter.seek(SeekFrom::Current(0))? as i32;
 
         let file_name = self.get_file_name();
-        let file_identifier = utils::convert_name(&file_name);
+        let file_identifier = utils::convert_name(&file_name, self.truncate_names);
         let file_identifier_len = file_identifier.len() + 2;
 
         output_writter.write_u8(file_entry_size as u8)?;
@@ -155,7 +156,7 @@ impl FileEntry {
         let file_name = self.get_file_name();
 
         // don't miss to count the ";1"!
-        utils::get_entry_size(0x21 + 2, &file_name, 0, 1)
+        utils::get_entry_size(0x21 + 2, &file_name, 0, 1, self.truncate_names)
     }
 
     pub fn update(&mut self) {
@@ -197,7 +198,7 @@ impl FileEntry {
         Ok(())
     }
 
-    pub fn new_buffered(name: String) -> FileEntry {
+    pub fn new_buffered(name: String, truncate_names: bool) -> FileEntry {
         FileEntry {
             file_type: FileType::Buffer {
                 name,
@@ -206,6 +207,7 @@ impl FileEntry {
             lba: 0,
             size: 0,
             aligned_size: 0,
+            truncate_names,
         }
     }
 }

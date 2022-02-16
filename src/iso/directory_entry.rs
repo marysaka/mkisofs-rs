@@ -22,10 +22,12 @@ pub struct DirectoryEntry {
     pub files_childs: Vec<FileEntry>,
     pub continuation_area: Option<Vec<u8>>,
     pub lba: u32,
+    pub truncate_names: bool,
 }
 
 impl DirectoryEntry {
     fn write_entry<T>(
+        &self,
         directory_entry: &DirectoryEntry,
         output_writter: &mut T,
         directory_type: u32,
@@ -49,7 +51,7 @@ impl DirectoryEntry {
 
         let file_name = directory_entry.path.file_name().unwrap().to_str().unwrap();
 
-        let file_name_fixed = utils::convert_name(file_name);
+        let file_name_fixed = utils::convert_name(file_name, self.truncate_names);
         let file_identifier = match directory_type {
             1 => &[0u8],
             2 => &[1u8],
@@ -198,7 +200,7 @@ impl DirectoryEntry {
 
         let directory_type = if self.path_table_index == 1 { 5 } else { 6 };
 
-        res += utils::get_entry_size(0x8, file_name, directory_type, 0);
+        res += utils::get_entry_size(0x8, file_name, directory_type, 0, self.truncate_names);
 
         for entry in &self.dir_childs {
             res += entry.get_path_table_size();
@@ -246,7 +248,7 @@ impl DirectoryEntry {
     pub fn get_entry_size(&self, directory_type: Option<u32>) -> u32 {
         let file_name = self.path.file_name().unwrap().to_str().unwrap();
 
-        utils::get_entry_size(0x21, file_name, directory_type.unwrap_or(0), 1)
+        utils::get_entry_size(0x21, file_name, directory_type.unwrap_or(0), 1, self.truncate_names)
     }
 
     pub fn get_file_name(&self) -> String {
@@ -254,6 +256,7 @@ impl DirectoryEntry {
     }
 
     fn write_path_table_entry<T, Order: ByteOrder>(
+        &self,
         directory_entry: &DirectoryEntry,
         output_writter: &mut T,
         directory_type: u32,
@@ -263,7 +266,7 @@ impl DirectoryEntry {
     {
         let file_name = directory_entry.path.file_name().unwrap().to_str().unwrap();
 
-        let file_name_fixed = utils::convert_name(file_name);
+        let file_name_fixed = utils::convert_name(file_name, self.truncate_names);
 
         let file_identifier = match directory_type {
             1 => &[0u8],
@@ -293,8 +296,8 @@ impl DirectoryEntry {
     where
         T: Write,
     {
-        for entry in &mut self.dir_childs {
-            DirectoryEntry::write_path_table_entry::<T, Order>(entry, output_writter, 0)?;
+        for entry in &self.dir_childs {
+            self.write_path_table_entry::<T, Order>(entry, output_writter, 0)?;
         }
 
         for entry in &mut self.dir_childs {
@@ -320,7 +323,7 @@ impl DirectoryEntry {
         let old_pos_current_context = output_writter.seek(SeekFrom::Current(0))?;
 
         // Write root
-        DirectoryEntry::write_path_table_entry::<T, Order>(self, output_writter, 1)?;
+        self.write_path_table_entry::<T, Order>(self, output_writter, 1)?;
 
         self.write_path_table_childs::<T, Order>(output_writter)?;
 
@@ -372,6 +375,7 @@ impl DirectoryEntry {
             files_childs: Vec::new(),
             lba: self.lba,
             continuation_area: None,
+            truncate_names: self.truncate_names,
         };
 
         let parent = match parent_option {
@@ -435,21 +439,21 @@ impl DirectoryEntry {
     where
         T: Write + Seek,
     {
-        DirectoryEntry::write_entry(self, output_writter, directory_type)
+        self.write_entry(self, output_writter, directory_type)
     }
 
     pub fn write_as_parent<T>(&self, output_writter: &mut T) -> std::io::Result<()>
     where
         T: Write + Seek,
     {
-        DirectoryEntry::write_entry(self, output_writter, 2)
+        self.write_entry(self, output_writter, 2)
     }
 
     fn write_one<T>(&self, output_writter: &mut T) -> std::io::Result<()>
     where
         T: Write + Seek,
     {
-        DirectoryEntry::write_entry(self, output_writter, 0)
+        self.write_entry(self, output_writter, 0)
     }
 
     fn write_continuation_area<T>(&self, output_writter: &mut T) -> std::io::Result<()>
@@ -597,7 +601,7 @@ impl DirectoryEntry {
                 let mut path_list: Vec<PathBuf> = Vec::new();
                 path_list.push(entry.path());
 
-                let mut new_dir = DirectoryEntry::new()?;
+                let mut new_dir = DirectoryEntry::new(self.truncate_names)?;
                 new_dir.set_path(&path_list)?;
                 DirectoryEntry::add_and_merge_childs_directories(
                     &mut dir_childs,
@@ -610,6 +614,7 @@ impl DirectoryEntry {
                     lba: 0,
                     aligned_size: utils::align_up(entry_meta.len() as i32, LOGIC_SIZE_U32 as i32)
                         as usize,
+                    truncate_names: self.truncate_names,
                 })
             }
         }
@@ -620,8 +625,7 @@ impl DirectoryEntry {
         Ok(())
     }
 
-    pub fn new() -> std::io::Result<DirectoryEntry> {
-
+    pub fn new(truncate_names: bool) -> std::io::Result<DirectoryEntry> {
         Ok(DirectoryEntry {
             path_table_index: 0,
             parent_index: 0,
@@ -630,6 +634,7 @@ impl DirectoryEntry {
             files_childs: Vec::new(),
             lba: 0,
             continuation_area: None,
+            truncate_names,
         })
     }
 }

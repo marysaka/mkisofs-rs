@@ -11,11 +11,11 @@ pub fn align_up(value: i32, padding: i32) -> i32 {
     (value + (padding - 1)) & -padding
 }
 
-pub fn convert_name(value: &str) -> Vec<u8> {
+pub fn convert_name(value: &str, truncate_names: bool) -> Vec<u8> {
     let res: Vec<&str> = value.split('.').collect();
 
     let file_name: &str = &res[0];
-    let file_truncated_size = if file_name.len() >= 8 {
+    let file_truncated_size = if truncate_names && file_name.len() >= 8 {
         8
     } else {
         file_name.len()
@@ -41,6 +41,7 @@ pub fn get_entry_size(
     file_name: &str,
     directory_type: u32,
     padding_type: usize,
+    truncate_names: bool,
 ) -> u32 {
     let file_name_len = file_name.len();
     if file_name_len > 251 {
@@ -50,7 +51,7 @@ pub fn get_entry_size(
         );
     }
 
-    let file_name_corrected = convert_name(file_name);
+    let file_name_corrected = convert_name(file_name, truncate_names);
     let file_identifier = match directory_type {
         1 => &[0u8],
         2 => &[1u8],

@@ -43,6 +43,20 @@ pub struct Opt {
 
     #[structopt(parse(from_os_str))]
     pub input_files: Vec<PathBuf>,
+
+    #[structopt(
+        long = "truncate-names",
+        help = "Truncate directory and file names to 8 characters",
+        parse(try_from_str), default_value = "true",
+    )]
+    pub truncate_names: bool,
+
+    #[structopt(
+        long = "volume-descriptor",
+        help = "Primary volume descriptor",
+        default_value = "ISOIMAGE",
+    )]
+    pub volume_descriptor: String,
 }
 
 #[derive(StructOpt, Debug)]

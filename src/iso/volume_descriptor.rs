@@ -46,6 +46,7 @@ impl VolumeDescriptor {
         root_dir: &mut DirectoryEntry,
         path_table_start_lba: u32,
         size_in_lb: u32,
+        volume_descriptor: &str,
     ) -> std::io::Result<()>
     where
         T: Write + Seek,
@@ -73,7 +74,9 @@ impl VolumeDescriptor {
                 let system_identifier: [u8; 32] = [0x20; 32];
                 output_writter.write_all(&system_identifier)?;
 
-                output_writter.write_all(b"ISOIMAGE                        ")?;
+                // 32 bytes of volume descriptor
+                let volume_descriptor = format!("{: <32}", volume_descriptor);
+                output_writter.write_all(&volume_descriptor.as_bytes())?;
                 output_writter.write_u64::<LittleEndian>(0)?;
 
                 // Size of the volume in LB

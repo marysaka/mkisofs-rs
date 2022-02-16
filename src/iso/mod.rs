@@ -76,8 +76,8 @@ fn generate_volume_descriptors(opt: &option::Opt) -> Vec<VolumeDescriptor> {
     res
 }
 
-fn create_boot_catalog(tree: &mut DirectoryEntry) {
-    let catalog_file = FileEntry::new_buffered(String::from("boot.catalog"));
+fn create_boot_catalog(tree: &mut DirectoryEntry, truncate_names: bool) {
+    let catalog_file = FileEntry::new_buffered(String::from("boot.catalog"), truncate_names);
     tree.add_file(catalog_file);
 }
 
@@ -312,10 +312,10 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
     // Reserve 4 LBA for path tables (add some spacing after table)
     current_lba += 4;
 
-    let mut tree = DirectoryEntry::new()?;
+    let mut tree = DirectoryEntry::new(opt.truncate_names)?;
 
     if opt.eltorito_opt.eltorito_boot.is_some() {
-        create_boot_catalog(&mut tree);
+        create_boot_catalog(&mut tree, opt.truncate_names);
     }
 
     tree.set_path(&opt.input_files)?;
@@ -358,7 +358,13 @@ pub fn create_iso(opt: &mut option::Opt) -> std::io::Result<()> {
     write_system_area(&mut tree, &mut out_file, opt, current_lba)?;
 
     for mut volume in volume_descriptor_list {
-        volume.write_volume(&mut out_file, &mut tree, path_table_start_lba, current_lba)?;
+        volume.write_volume(
+            &mut out_file,
+            &mut tree,
+            path_table_start_lba,
+            current_lba,
+            &opt.volume_descriptor,
+        )?;
     }
 
     // FIXME: what is this and why do I need it???? checksum infos??
