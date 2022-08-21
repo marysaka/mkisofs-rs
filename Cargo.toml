@@ -1,6 +1,6 @@
 [package]
 name = "mkisofs-rs"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2018"
 description = "A partial reimplementation of mkisofs to create hybrid ISO-9660 filesystem-image"
 authors = ["Thog <me@thog.eu>"]
