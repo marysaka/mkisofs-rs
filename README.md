@@ -1,5 +1,5 @@
-[![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/Thog/mkisofs-rs/master/LICENSE-MIT)
-[![Apache 2 license](https://img.shields.io/badge/license-Apache-blue.svg)](https://raw.githubusercontent.com/Thog/mkisofs-rs/master/LICENSE-APACHE)
+[![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/marysaka/mkisofs-rs/master/LICENSE-MIT)
+[![Apache 2 license](https://img.shields.io/badge/license-Apache-blue.svg)](https://raw.githubusercontent.com/marysaka/mkisofs-rs/master/LICENSE-APACHE)
 
 # Introduction
 
