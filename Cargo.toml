@@ -1,9 +1,9 @@
 [package]
 name = "mkisofs-rs"
-version = "0.1.2"
-edition = "2018"
+version = "0.2.0"
+edition = "2021"
 description = "A partial reimplementation of mkisofs to create hybrid ISO-9660 filesystem-image"
-authors = ["Thog <me@thog.eu>"]
+authors = ["Mary <mary@mary.zone>"]
 license = "MIT/Apache-2.0"
 homepage = "https://github.com/Thog/mkisofs-rs"
 repository = "https://github.com/Thog/mkisofs-rs"
@@ -13,4 +13,4 @@ categories = ["development-tools", "command-line-utilities", "filesystem"]
 [dependencies]
 byteorder = "1"
 chrono = "0.4"
-structopt = "0.2"
+structopt = "0.3"

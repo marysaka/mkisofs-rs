@@ -4,7 +4,6 @@ use crate::iso::utils::{LOGIC_SIZE, LOGIC_SIZE_I64, LOGIC_SIZE_U32};
 use byteorder::{BigEndian, ByteOrder, LittleEndian, WriteBytesExt};
 use chrono::prelude::*;
 
-use std;
 use std::fs;
 use std::fs::DirEntry;
 use std::fs::Metadata;
@@ -276,7 +275,7 @@ impl DirectoryEntry {
         output_writter.write_u8(0x0u8)?;
         output_writter.write_u32::<Order>(directory_entry.lba)?;
         output_writter.write_u16::<Order>(directory_entry.parent_index as u16)?;
-        output_writter.write_all(&file_identifier)?;
+        output_writter.write_all(file_identifier)?;
 
         // padding if odd
         if (file_identifier_len % 2) != 0 {
@@ -582,11 +581,10 @@ impl DirectoryEntry {
 
         let mut ordered_dir: Vec<DirEntry> = path
             .iter()
-            .map(|path| {
+            .flat_map(|path| {
                 let res: Vec<DirEntry> = fs::read_dir(path).unwrap().map(|r| r.unwrap()).collect();
                 res
             })
-            .flatten()
             .collect();
 
         ordered_dir.sort_by_key(|dir| dir.path());
@@ -594,15 +592,10 @@ impl DirectoryEntry {
         for entry in ordered_dir {
             let entry_meta: Metadata = entry.metadata()?;
             if entry_meta.is_dir() {
-                let mut path_list: Vec<PathBuf> = Vec::new();
-                path_list.push(entry.path());
-
+                let path_list: Vec<PathBuf> = vec![entry.path()];
                 let mut new_dir = DirectoryEntry::new()?;
                 new_dir.set_path(&path_list)?;
-                DirectoryEntry::add_and_merge_childs_directories(
-                    &mut dir_childs,
-                    new_dir
-                );
+                DirectoryEntry::add_and_merge_childs_directories(&mut dir_childs, new_dir);
             } else if entry_meta.is_file() {
                 files_childs.push(FileEntry {
                     file_type: FileType::Regular { path: entry.path() },
@@ -621,7 +614,6 @@ impl DirectoryEntry {
     }
 
     pub fn new() -> std::io::Result<DirectoryEntry> {
-
         Ok(DirectoryEntry {
             path_table_index: 0,
             parent_index: 0,

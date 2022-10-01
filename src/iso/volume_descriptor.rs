@@ -5,7 +5,6 @@ use crate::iso::directory_entry::DirectoryEntry;
 use crate::iso::file_entry::FileEntry;
 use crate::iso::utils::LOGIC_SIZE_U16;
 
-use std;
 use std::io::prelude::*;
 
 #[allow(dead_code)]

@@ -18,7 +18,7 @@ pub struct Opt {
         long = "generic-boot",
         short = "G",
         help = "Copy at most 32768 bytes from the given disk file to the very start of the ISO image",
-        raw(aliases = r#"&["embedded-boot"]"#, next_line_help = "true")
+        aliases = &["embedded-boot"]
     )]
     pub embedded_boot: Option<String>,
 

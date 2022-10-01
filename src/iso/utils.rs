@@ -14,7 +14,7 @@ pub fn align_up(value: i32, padding: i32) -> i32 {
 pub fn convert_name(value: &str) -> Vec<u8> {
     let res: Vec<&str> = value.split('.').collect();
 
-    let file_name: &str = &res[0];
+    let file_name: &str = res[0];
     let file_truncated_size = if file_name.len() >= 8 {
         8
     } else {

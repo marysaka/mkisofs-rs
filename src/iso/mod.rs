@@ -12,7 +12,6 @@ use crate::iso::file_entry::{FileEntry, FileType};
 use crate::iso::utils::SECTOR_SIZE;
 use crate::iso::utils::{LOGIC_SIZE, LOGIC_SIZE_U32};
 use crate::iso::volume_descriptor::VolumeDescriptor;
-use std;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Cursor;
@@ -235,7 +234,7 @@ where
     if need_grub2_mbr_patches {
         if let Some(boot) = &opt.eltorito_opt.eltorito_boot {
             output_writter.seek(SeekFrom::Start(old_pos + 0x1B0))?;
-            let file: &mut FileEntry = tree.get_file(&boot).unwrap();
+            let file: &mut FileEntry = tree.get_file(boot).unwrap();
             output_writter.write_u64::<LittleEndian>(u64::from(file.lba * 4 + 4))?;
             // Go back to where we are supposed to be...
             output_writter.seek(SeekFrom::Start(current_pos))?;
